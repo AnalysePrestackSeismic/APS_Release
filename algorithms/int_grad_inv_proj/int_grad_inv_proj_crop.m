@@ -1,4 +1,4 @@
-function [] = int_grad_inv_proj(job_meta_path,i_block,startvol,volinc,endvol,tottracerun,maxzout,wavevar)
+function [] = int_grad_inv_proj(job_meta_path,i_block,startvol,volinc,endvol,tottracerun,varargin,wavevar)
 %
 %% ------------------ Disclaimer  ------------------
 % 
@@ -72,7 +72,21 @@ else
 end
 % tottracerun = 500;
 %maxzout = 8000;
-maxzout = str2double(maxzout);
+% maxzout = str2double(maxzout);
+maxzout = 0;
+
+if ~isempty(varargin)
+    % test to make sure zmin and zmax were set
+    if length(varargin) == 2
+         minzout= str2double(varargin{1});
+         maxzout= str2double(varargin{2});
+        ztrunc = 1;
+    else
+        error('must specify zmin and zmax on command line if using z limits');
+    end
+end
+
+
 
 output_std = 0;     % do you want to calculate and output standard line fitting intercept and gradient and eer
 plot_on = 0;        % do you want interactive plots to pop up when running (just for debug)
@@ -126,18 +140,10 @@ if tottracerun == 0
     
     ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
     if useselectemode == 1;
-        if maxzout==0
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
+        testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
     else
-        if maxzout==0
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
-    end
+        testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
+    end    
 else
     eer_weight_out = num2str((eer_weight*1000));
     %eer_weight_out = regexprep(eer_weight_out, '0.', '');
@@ -175,15 +181,19 @@ end
 vol_index_wb = 1;
 if job_meta.is_gather == 0
     pick_wb_ind = ceil(job_meta.nvols*0.6667);
+    if ztrunc == 1
+        [~, traces{vol_index_wb}, ilxl_read{vol_index_wb}] = node_segy_read(job_meta_path,num2str(pick_wb_ind),i_block,minzout,maxzout);
+    else
+        [~, traces{vol_index_wb}, ilxl_read{vol_index_wb}] = node_segy_read(job_meta_path,num2str(pick_wb_ind),i_block);
+    end
     
-    [~, traces{vol_index_wb}, ilxl_read{vol_index_wb}] = node_segy_read(job_meta_path,num2str(pick_wb_ind),i_block);
     % check to make sure it read something if not exit
     if size(traces{vol_index_wb},1) == 1 && size(traces{vol_index_wb},2) == 1
         return
     end
     traces{vol_index_wb} = traces{vol_index_wb}(1:maxzout,:);
     n_samples_fullz = job_meta.n_samples{1};
-    job_meta.n_samples{1} = maxzout;    
+    job_meta.n_samples{1} = maxzout;
 else
     
     
@@ -192,7 +202,11 @@ else
     
     % read all the data for this block
     % node_segy_read(job_meta_path,vol_index,i_block)
-    [~, vol_traces, ilxl_read{vol_index_wb}, offset_read] = node_segy_read(job_meta_path,'1',i_block);    
+    if ztrunc == 1
+        [~, vol_traces, ilxl_read{vol_index_wb}, offset_read] = node_segy_read(job_meta_path,'1',i_block,minzout,maxzout);
+    else
+        [~, vol_traces, ilxl_read{vol_index_wb}, offset_read] = node_segy_read(job_meta_path,'1',i_block);
+    end
     vol_traces = vol_traces(1:maxzout,:);       % truncate data to make z axis number
     job_meta.n_samples{1} = maxzout;            % Write max zout in job meta file    
     offset = unique(offset_read);               % find the total number of offsets
@@ -335,21 +349,8 @@ if isfield(job_meta, 'wb_path')
 else
     [wb_idx] = water_bottom_picker(traces{vol_index_wb},padding);
     wb_idx(wb_idx < 0) = 1;
-    [max_wb,max_wb_ind] = max(wb_idx);
-    wb_idx(max_wb_ind) = 0;
-    [max_wb2,max_wb_ind2] = max(wb_idx);
-    
-    if max_wb - max_wb2 > 20
-        max_wb_idx = max_wb2;
-        wb_idx(max_wb_ind) = max_wb2;
-    else
-        wb_idx(max_wb_ind) = max_wb;
-        max_wb_idx = max_wb;
-    end
-    
-    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max_wb_idx)');   
-    
-    
+    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
+                                                                      
     win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
     job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
    
@@ -409,8 +410,14 @@ else
 
         % Read traces
         %[~, traces{vol_count}, ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
-        [~, vol_traces(vol_count,:,:), ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
-
+        
+        if ztrunc == 1
+            [~, vol_traces(vol_count,:,:), ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block,minzout,maxzout);
+        else
+            
+            [~, vol_traces(vol_count,:,:), ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
+        end
+        
         % Flatten traces to water bottom
         %traces{vol_count} = traces{vol_count}(win_ind);
         %vol_traces(vol_count,:,:) = vol_traces(vol_count,win_ind);
@@ -673,7 +680,6 @@ first_iter = 1;
 if tottracerun ~= 0;
     ntraces = tottracerun;
 end
-
 last_iter = ntraces;
 
 % Begin inversion loop
@@ -923,23 +929,6 @@ results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_minimum_energy_eer_pr
 results_out{resultno,3} = 0;
 resultno = resultno + 1;
 
-results_out{resultno,1} = strcat('digi_maximum_energy_eer_projection',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-digi_maximum_energy_eer_projection = [bsxfun(@times,ava(1:ns,:),cosd(chi-90))+bsxfun(@times,ava(1+ns:end,:),sind(chi-90));zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_maximum_energy_eer_projection(1:ns,:);
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
-results_out{resultno,1} = strcat('digi_ItimesG',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*(ava(1+ns:end,:).*ava(1:ns,:));
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
 if needconf == 1;
     results_out{resultno,1} = strcat('digi_confidence',testdiscpt);
     %results_out{5,2} = digi_confidence;
@@ -972,13 +961,18 @@ end
 % segy write function
 if exist(strcat(job_meta.output_dir,'digi_results/'),'dir') == 0
     output_dir = strcat(job_meta.output_dir,'digi_results/');
-    mkdir(output_dir);    
+    mkdir(output_dir);
 else
     output_dir = strcat(job_meta.output_dir,'digi_results/');
 end
 
 i_block = str2double(i_block);
-node_segy_write(results_out,i_block,job_meta.s_rate/1000,output_dir);
+if ztrunc == 1
+    node_segy_write(results_out,i_block,job_meta.s_rate/1000,output_dir,minzout);
+else
+    node_segy_write(results_out,i_block,job_meta.s_rate/1000,output_dir);
+end
+
 
 end
 

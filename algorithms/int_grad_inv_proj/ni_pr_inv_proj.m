@@ -126,18 +126,10 @@ if tottracerun == 0
     
     ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
     if useselectemode == 1;
-        if maxzout==0
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
+        testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
     else
-        if maxzout==0
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
-    end
+        testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
+    end    
 else
     eer_weight_out = num2str((eer_weight*1000));
     %eer_weight_out = regexprep(eer_weight_out, '0.', '');
@@ -335,21 +327,8 @@ if isfield(job_meta, 'wb_path')
 else
     [wb_idx] = water_bottom_picker(traces{vol_index_wb},padding);
     wb_idx(wb_idx < 0) = 1;
-    [max_wb,max_wb_ind] = max(wb_idx);
-    wb_idx(max_wb_ind) = 0;
-    [max_wb2,max_wb_ind2] = max(wb_idx);
-    
-    if max_wb - max_wb2 > 20
-        max_wb_idx = max_wb2;
-        wb_idx(max_wb_ind) = max_wb2;
-    else
-        wb_idx(max_wb_ind) = max_wb;
-        max_wb_idx = max_wb;
-    end
-    
-    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max_wb_idx)');   
-    
-    
+    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
+                                                                      
     win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
     job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
    
@@ -673,7 +652,6 @@ first_iter = 1;
 if tottracerun ~= 0;
     ntraces = tottracerun;
 end
-
 last_iter = ntraces;
 
 % Begin inversion loop
@@ -923,23 +901,6 @@ results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_minimum_energy_eer_pr
 results_out{resultno,3} = 0;
 resultno = resultno + 1;
 
-results_out{resultno,1} = strcat('digi_maximum_energy_eer_projection',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-digi_maximum_energy_eer_projection = [bsxfun(@times,ava(1:ns,:),cosd(chi-90))+bsxfun(@times,ava(1+ns:end,:),sind(chi-90));zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_maximum_energy_eer_projection(1:ns,:);
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
-results_out{resultno,1} = strcat('digi_ItimesG',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*(ava(1+ns:end,:).*ava(1:ns,:));
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
 if needconf == 1;
     results_out{resultno,1} = strcat('digi_confidence',testdiscpt);
     %results_out{5,2} = digi_confidence;
@@ -986,9 +947,11 @@ end
 function [IGmatrix] = build_operator(totalvol,input_angles,ns_wavelet,wavelet_tmp,ns,hns_wavelet,angle_index,chi,alpha,IGblank,smooth)
     % Build operator for inversion
     for ii = 1:totalvol
-        Iwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}';
-        %Iwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}'*(cosd(input_angles(ii)).*cosd(input_angles(ii)));
+        Iwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}'*(cosd(input_angles(ii)).*cosd(input_angles(ii)));
         Gwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}'*(sind(input_angles(ii)).*sind(input_angles(ii)));
+        %Iwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}';
+        %Iwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}'*(cosd(input_angles(ii)).*cosd(input_angles(ii)));
+        %Gwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = wavelet_tmp{ii}'*(sind(input_angles(ii)).*sind(input_angles(ii)));
         %Iwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = interp1(wavelet_z_grid,wavelet_tmp{ii}',start_interp:1:end_interp,'linear','extrap');
         %Gwavelet_interp(:,1+(ii-1)*ns_wavelet:ii*ns_wavelet) = interp1(wavelet_z_grid,...
         %    wavelet_tmp{ii}'*(sind(input_angles(ii)).*sind(input_angles(ii))),start_interp:1:end_interp,'linear','extrap');

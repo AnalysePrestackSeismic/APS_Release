@@ -1,4 +1,4 @@
-function [] = int_grad_inv_proj(job_meta_path,i_block,startvol,volinc,endvol,tottracerun,maxzout,wavevar)
+function [] = int_grad_inv_proj_test_for_ubc(job_meta_path,i_block,startvol,volinc,endvol,tottracerun,maxzout,wavevar)
 %
 %% ------------------ Disclaimer  ------------------
 % 
@@ -27,9 +27,9 @@ function [] = int_grad_inv_proj(job_meta_path,i_block,startvol,volinc,endvol,tot
 %   Inputs:
 %       job_mat_path = path of metadata .mat file.
 %       i_block = current block to be processed.
-%       startvol = Index number of the first angle trace/volume to read
-%       volinc = Index number angle trace/volume increment
-%       endvol = Index number of the last angle trace/volume to read
+%       startvol = number of the first angle trace/volume to read
+%       volinc = angle trace/volume increment
+%       endvol = number of the last angle trace/volume to read
 %       tottracerun = number of traces to output, 0 = all, and il1234 would
 %       only output inline 1234
 %       maxzout = To be given in samples if this is initialized as 0 this will be
@@ -109,147 +109,111 @@ lowfreqtaperstart = 6; % Hz to start tapering the wavelet down from to 0 hz
 wsmo_scal = 5; % scaler to make the weighting in the tikonov regularisation , normally set to 5 * the std dev of the amplitudes of the input data as measured
                % in the wavelet estimation code  
 
+               
+load('/apps/gsc/matlab-library/ubc_int_grad_test1.mat');               
+               
 % end of parameters
 %%
-% set initial variables
-totalvol = length(startvol:volinc:endvol);              % Total number of volumes to load
-job_meta = load(job_meta_path);                         % Load job meta information 
-wsmooth = job_meta.stdev_smo(str2double(i_block))*wsmo_scal;    % Get stdev for this block from the mat file
-topfreq = 500000/job_meta.s_rate;
-top3dpt = topfreq*0.72;
-%
-if tottracerun == 0
-    eer_weight_out = num2str((eer_weight*1000));
-    %eer_weight_out = regexprep(eer_weight_out, '0.', '');
-    tol_out = num2str((tol*10000));
-    %tol_out = regexprep(tol_out, '0.', '');
-    
-    ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
-    if useselectemode == 1;
-        if maxzout==0
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
-    else
-        if maxzout==0
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
-    end
-else
-    eer_weight_out = num2str((eer_weight*1000));
-    %eer_weight_out = regexprep(eer_weight_out, '0.', '');
-    tol_out = num2str((tol*10000));
-    %tol_out = regexprep(tol_out, '0.', '');
-    testdiscpt = [date,'_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_range_p',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
-    ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
-end
-
-% add the history of jobs run and this one to the curent ebcdic
-if isfield(job_meta,'comm_history')
-    ebdichdr2 = job_meta.comm_history;
-    tmpebc = ebdichdr2{size(ebdichdr2,1),2};
-else
-    ebdichdr2{1,2} = '';
-    tmpebc = '';
-end
-
-for ebcii = (size(ebdichdr2,1)-1):-1:1
-    tmpebcc = regexp(ebdichdr2{ebcii,2},'/','split');
-    tmpebc = [tmpebc tmpebcc{1}  tmpebcc{end}]; 
-end
-tmpebc = sprintf('%-3200.3200s',tmpebc);
-clear tmpebcc ebdichdr2;
-
-fprintf('reading data for total volumes = %d\n',totalvol)       % Make ouput directories and create meta information
-
-% set maxzout if set to 0 on the command line
-if maxzout == 0
-    maxzout = job_meta.n_samples{1};                            % maxzout set yo maximum number of samples
-end
-%%
-%==========================================================================================================================
-% read data to find data to pick a water bottom on
-vol_index_wb = 1;
-if job_meta.is_gather == 0
-    pick_wb_ind = ceil(job_meta.nvols*0.6667);
-    
-    [~, traces{vol_index_wb}, ilxl_read{vol_index_wb}] = node_segy_read(job_meta_path,num2str(pick_wb_ind),i_block);
-    % check to make sure it read something if not exit
-    if size(traces{vol_index_wb},1) == 1 && size(traces{vol_index_wb},2) == 1
-        return
-    end
-    traces{vol_index_wb} = traces{vol_index_wb}(1:maxzout,:);
-    n_samples_fullz = job_meta.n_samples{1};
-    job_meta.n_samples{1} = maxzout;    
-else
-    
-    
-    % find the water bottom on a few gathers and take the middle one t use
-    % as an offset plane to pick the water bottom on
-    
-    % read all the data for this block
-    % node_segy_read(job_meta_path,vol_index,i_block)
-    [~, vol_traces, ilxl_read{vol_index_wb}, offset_read] = node_segy_read(job_meta_path,'1',i_block);    
-    vol_traces = vol_traces(1:maxzout,:);       % truncate data to make z axis number
-    job_meta.n_samples{1} = maxzout;            % Write max zout in job meta file    
-    offset = unique(offset_read);               % find the total number of offsets
-    %#############for lobster TRN limit offset to 40 and rerun for failed
-    %blocks###################################################################
-    
-    if isempty(vol_traces) == 1 &&  isempty(ilxl_read) == 1 && isempty(offset_read) == 1
-        return
-    end
-    %juststack = 1;
-    %if juststack == 1
-    traces{vol_index_wb} = zeros(size(vol_traces,1),size(vol_traces,2)/size(offset,2));
-    for stki  = 1:size(offset,2)
-        traces{vol_index_wb} = traces{vol_index_wb} + vol_traces(:,offset_read == offset(stki));
-    end
-    
-    pick_wb_ind = job_meta.live_offset_avg;
-        
-%         % should reshape and sum instead of this terrible loop
-%     %else
-%         
-%         %read the middle 5 gathers in the input data to find the middle tkey(angle/offset) value of the water bottom
-%         %tracestest{vol_index_wb} = vol_traces(:,(floor(size(vol_traces,2)/2)-(length(offset)*2)):(floor(size(vol_traces,2)/2)+(length(offset)*2)));
-%         tracestest{vol_index_wb} = vol_traces(:,(floor(size(vol_traces,2)/2)-(length(offset)*2.5)+2):(floor(size(vol_traces,2)/2)+(length(offset)*2.5)));
-%         tmpoffread = offset_read((floor(size(vol_traces,2)/2)-(length(offset)*2.5)+2):(floor(size(vol_traces,2)/2)+(length(offset)*2.5)));
-%         %pick the water bottom
-%         %pick the water bottom
-%         [wb_idxcj] = water_bottom_picker(tracestest{vol_index_wb}(:,:),0);
-%         %filter the water bottom pick to make a difference in WB time for
-%         %traces that are not picking the wb
-%         filtw = [1 2 3 2 1]/9;
-%         wb_idxcjfilt = conv(wb_idxcj,filtw,'same');
-%         % now make a blank array the size of the wb index array
-%         wb_idxcj2 = zeros(1,size(wb_idxcj,2));
-%         %now find the difference between the values of the filtered and
-%         %unfiltered water bottom indexes, if there is a difference then it is
-%         %likely to not be the water bottom as it should be mostly flat on the
-%         %gathers
-%         wb_idx_diff_ck = abs((wb_idxcj./wb_idxcjfilt)-1);
-%         wb_idxcj2(wb_idx_diff_ck < 0.009) =  wb_idxcj(wb_idx_diff_ck < 0.009);
-%         
-%         %now work out the index locations of the water bottom
-%         wb_idx_index = 1:1:size(wb_idxcj,2);
-%         %apply a logical index to the index array to give the index of where the wb is picked and less then 10 elsewhere
-%         wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))));
-%         % select the angles with the wb on
-%         tmpwbangs = (tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))))));
-%         tmpangpickstd = ceil(std(double(tmpwbangs)));
-%         tmpangpick = floor(mean(tmpwbangs));
-%         %tmpangpick = floor(mean(tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1)))))));
-%         pick_wb_ind = find(offset == tmpangpick);
-%         
-%         clear tracestest offset_read;
+% % set initial variables
+% totalvol = length(startvol:volinc:endvol);              % Total number of volumes to load
+% job_meta = load(job_meta_path);                         % Load job meta information 
+% wsmooth = job_meta.stdev_smo(str2double(i_block))*wsmo_scal;    % Get stdev for this block from the mat file
+% topfreq = 500000/job_meta.s_rate;
+% top3dpt = topfreq*0.72;
+% %
+% if tottracerun == 0
+%     eer_weight_out = num2str((eer_weight*1000));
+%     %eer_weight_out = regexprep(eer_weight_out, '0.', '');
+%     tol_out = num2str((tol*10000));
+%     %tol_out = regexprep(tol_out, '0.', '');
+%     
+%     ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
+%     if useselectemode == 1;
+%         testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
+%     else
+%         testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
+%     end    
+% else
+%     eer_weight_out = num2str((eer_weight*1000));
+%     %eer_weight_out = regexprep(eer_weight_out, '0.', '');
+%     tol_out = num2str((tol*10000));
+%     %tol_out = regexprep(tol_out, '0.', '');
+%     testdiscpt = [date,'_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_range_p',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
+%     ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
+% end
 % 
+% % add the history of jobs run and this one to the curent ebcdic
+% if isfield(job_meta,'comm_history')
+%     ebdichdr2 = job_meta.comm_history;
+%     tmpebc = ebdichdr2{size(ebdichdr2,1),2};
+% else
+%     ebdichdr2{1,2} = '';
+%     tmpebc = '';
+% end
+% 
+% for ebcii = (size(ebdichdr2,1)-1):-1:1
+%     tmpebcc = regexp(ebdichdr2{ebcii,2},'/','split');
+%     tmpebc = [tmpebc tmpebcc{1}  tmpebcc{end}]; 
+% end
+% tmpebc = sprintf('%-3200.3200s',tmpebc);
+% clear tmpebcc ebdichdr2;
+% 
+% fprintf('reading data for total volumes = %d\n',totalvol)       % Make ouput directories and create meta information
+% 
+% % set maxzout if set to 0 on the command line
+% if maxzout == 0
+%     maxzout = job_meta.n_samples{1};                            % maxzout set yo maximum number of samples
+% end
+% %%
+% %==========================================================================================================================
+% % read data to find data to pick a water bottom on
+% vol_index_wb = 1;
+% if job_meta.is_gather == 0
+%     pick_wb_ind = ceil(job_meta.nvols*0.6667);
+%     
+%     [~, traces{vol_index_wb}, ilxl_read{vol_index_wb}] = node_segy_read(job_meta_path,num2str(pick_wb_ind),i_block);
+%     % check to make sure it read something if not exit
+%     if size(traces{vol_index_wb},1) == 1 && size(traces{vol_index_wb},2) == 1
+%         return
+%     end
+%     traces{vol_index_wb} = traces{vol_index_wb}(1:maxzout,:);
+%     n_samples_fullz = job_meta.n_samples{1};
+%     job_meta.n_samples{1} = maxzout;    
+% else
+%     
+%     
+%     % find the water bottom on a few gathers and take the middle one t use
+%     % as an offset plane to pick the water bottom on
+%     
+%     % read all the data for this block
+%     % node_segy_read(job_meta_path,vol_index,i_block)
+%     [~, vol_traces, ilxl_read{vol_index_wb}, offset_read] = node_segy_read(job_meta_path,'1',i_block);    
+%     vol_traces = vol_traces(1:maxzout,:);       % truncate data to make z axis number
+%     job_meta.n_samples{1} = maxzout;            % Write max zout in job meta file    
+%     offset = unique(offset_read);               % find the total number of offsets
+%     %#############for lobster TRN limit offset to 40 and rerun for failed
+%     %blocks###################################################################
+%     
+%     if isempty(vol_traces) == 1 &&  isempty(ilxl_read) == 1 && isempty(offset_read) == 1
+%         return
+%     end
+%     %juststack = 1;
+%     %if juststack == 1
+%     traces{vol_index_wb} = zeros(size(vol_traces,1),size(vol_traces,2)/size(offset,2));
+%     for stki  = 1:size(offset,2)
+%         traces{vol_index_wb} = traces{vol_index_wb} + vol_traces(:,offset_read == offset(stki));
+%     end
+%     
+%     pick_wb_ind = job_meta.live_offset_avg;
 %         
-% %         [wb_idxcj] = water_bottom_picker(traces{vol_index_wb}(:,:),0);
+% %         % should reshape and sum instead of this terrible loop
+% %     %else
 % %         
+% %         %read the middle 5 gathers in the input data to find the middle tkey(angle/offset) value of the water bottom
+% %         %tracestest{vol_index_wb} = vol_traces(:,(floor(size(vol_traces,2)/2)-(length(offset)*2)):(floor(size(vol_traces,2)/2)+(length(offset)*2)));
+% %         tracestest{vol_index_wb} = vol_traces(:,(floor(size(vol_traces,2)/2)-(length(offset)*2.5)+2):(floor(size(vol_traces,2)/2)+(length(offset)*2.5)));
+% %         tmpoffread = offset_read((floor(size(vol_traces,2)/2)-(length(offset)*2.5)+2):(floor(size(vol_traces,2)/2)+(length(offset)*2.5)));
+% %         %pick the water bottom
 % %         %pick the water bottom
 % %         [wb_idxcj] = water_bottom_picker(tracestest{vol_index_wb}(:,:),0);
 % %         %filter the water bottom pick to make a difference in WB time for
@@ -263,276 +227,298 @@ else
 % %         %likely to not be the water bottom as it should be mostly flat on the
 % %         %gathers
 % %         wb_idx_diff_ck = abs((wb_idxcj./wb_idxcjfilt)-1);
-% %         wb_idxcj2(wb_idx_diff_ck < 0.005) =  wb_idxcj(wb_idx_diff_ck < 0.005);
+% %         wb_idxcj2(wb_idx_diff_ck < 0.009) =  wb_idxcj(wb_idx_diff_ck < 0.009);
 % %         
 % %         %now work out the index locations of the water bottom
 % %         wb_idx_index = 1:1:size(wb_idxcj,2);
 % %         %apply a logical index to the index array to give the index of where the wb is picked and less then 10 elsewhere
-% %         wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10))));
-% %         % calculate the gather index in each gather by removing the integer
-% %         % number of gathers from the index number and putting back to all being
-% %         % the same angle index in each gather ie 1-46,1-46,1-46 etc... and
-% %         % findingf the average value of all the indexes
-% %         pick_wb_ind = floor(mean(((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset) - floor((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset)))*length(offset)));
-% %         %read the offset plane from the input data gathers.
-% %         %traces{vol_index_wb} = vol_traces(:,offset_read == offset(pick_wb_ind));
-        
-        
-    %end
-end
-
-
-% pkey_inc_mode = mode(job_meta.pkey_inc);
-% skey_inc_mode = mode(job_meta.skey_inc);
-% 
-% n_iline = (ilxl_read{vol_index_wb}(:,1)-min(ilxl_read{vol_index_wb}(:,1)))/pkey_inc_mode+1;
-% n_xline = (ilxl_read{vol_index_wb}(:,2)-min(ilxl_read{vol_index_wb}(:,2)))/skey_inc_mode+1;
-% skeyn = (max(ilxl_read{vol_index_wb}(:,2))-min(ilxl_read{vol_index_wb}(:,2)))/skey_inc_mode+1;
-% pkeyn = (max(ilxl_read{vol_index_wb}(:,1))-min(ilxl_read{vol_index_wb}(:,1)))/pkey_inc_mode+1;
-% lin_ind = ((n_iline-1).*skeyn)+n_xline;
-
-%==========================================================================================================================
-% Pick water bottom or use a pre picked water bottom horizon
-if isfield(job_meta, 'wb_path')
-    %wb_idx = dlmread(job_meta.wb_path,'delimiter','\t');
-    wb_idx_in = dlmread(job_meta.wb_path);
-    %wb_idx_in = sortrows(wb_idx_in,[1 2]);
-    % col 1 inline
-    % col 2 xline
-    % col 3 twt
-    if job_meta.is_gather == 1
-        [~,locations] = ismember(ilxl_read{1}(1:length(offset):end,:),wb_idx_in(:,1:2),'rows');
-    else    
-        [~,locations] = ismember(ilxl_read{1}(1:end,:),wb_idx_in(:,1:2),'rows');    
-    end
-    %wb_idx = zeros(size(traces{vol_index_wb},2),1);
-    zero_loc = locations ~= 0;
-    %wb_idx
-    %zero_loc = wb_idx_in(locations(zero_loc),3); comment this line to
-    %match wavelet estimation - cj 27_02_2015
-    % but i do not see why this is not just
-    %wb_idx =  wb_idx_in(locations,3)
-    xi = (1:size(traces{vol_index_wb},2))';
-    x = xi(zero_loc)';
-    wb_idx = interp1(x,wb_idx_in(locations(zero_loc),3),xi);
-    clear wb_idx_in
-    %min_il = min(ilxl_read{vol_index_wb}(:,1));
-    %max_il = max(ilxl_read{vol_index_wb}(:,1));
-    %min_xl = min(ilxl_read{vol_index_wb}(:,2));
-    %max_xl = max(ilxl_read{vol_index_wb}(:,2));
-    %wb_idx2 = wb_idx(wb_idx(:,1) >= min_il & wb_idx(:,1) <= max_il & wb_idx(:,2) >= min_xl & wb_idx(:,2) <= max_xl,:);
-    %    wb_idx = wb_idx(wb_idx(:,1) >= min_il & wb_idx(:,1) <= (max_il+1) & wb_idx(:,2) >= min_xl & wb_idx(:,2) <= (max_xl+1),:);
-    %   wb_idx(:,3) = wb_idx(:,3)./(job_meta.s_rate/1000);
-    wb_idx = (wb_idx./(job_meta.s_rate/1000))';
-    
-    wb_idx = round(wb_idx-padding);
-    wb_idx(isnan(wb_idx)) = 1;
-    wb_idx(wb_idx < 1) = 1;
-    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
-    
-    win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
-        job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
-else
-    [wb_idx] = water_bottom_picker(traces{vol_index_wb},padding);
-    wb_idx(wb_idx < 0) = 1;
-    [max_wb,max_wb_ind] = max(wb_idx);
-    wb_idx(max_wb_ind) = 0;
-    [max_wb2,max_wb_ind2] = max(wb_idx);
-    
-    if max_wb - max_wb2 > 20
-        max_wb_idx = max_wb2;
-        wb_idx(max_wb_ind) = max_wb2;
-    else
-        wb_idx(max_wb_ind) = max_wb;
-        max_wb_idx = max_wb;
-    end
-    
-    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max_wb_idx)');   
-    
-    
-    win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
-    job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
-   
-end
-%%
-%==========================================================================================================================
-% read in all the data and decimate as required (allready read in for gathers)
-if job_meta.is_gather == 1
-    % reshape the gather array to the same 3d matrix as the angle volumes
-    %vol_tracescjtmp = reshape(vol_traces,size(traces{vol_index_wb},1),length(offset),size(traces{vol_index_wb},2));
-    %vol_traces = vol_tracescjtmp(:,(startvol:volinc:endvol),:);
-    %clear vol_tracescjtmp;
-    % this can just be vol_traces_cjtmp is not needed, just put in to check
-    % debug stages
-    vol_traces = reshape(vol_traces,size(traces{vol_index_wb},1),length(offset),size(traces{vol_index_wb},2));
-    
-    % try applying a running average to the data to smooth out variations
-    % on the angle gathers
-        
-    filttraces = [1 1 1]/3;
-    %----- Finding the mute and discarding the points outside it by a mask----------------
-    for ii = 1:1:size(vol_traces,3)
-        % mute the low amplitude areas
-        mask = low_amp_mute(vol_traces(:,:,ii));
-        % apply a small smoother to reduce noise
-%        vol_traces(:,:,ii) = conv2(1,filttraces,vol_traces(:,:,ii),'same');
-        vol_traces(:,:,ii) = vol_traces(:,:,ii) .* mask;
-        %imagesc(vol_traces(:,:,ii));
-        %colormap(gray);
-        %caxis([-500 500]);
-    end
-    
-    %drop the angles that are not needed
-    % note the 3 trace average above to allow 2:1 decimation with a bit of
-    % anti aliasing, not perfect but ...
-    vol_traces = vol_traces(:,(startvol:volinc:endvol),:);    
-    
-    input_angles = double(offset(startvol:volinc:endvol));
-    % resize the ilxl data to drop to stack fold
-    tmp_ilxlrd = ilxl_read{vol_index_wb}(1:length(offset):end,:);
-    ilxl_read{vol_index_wb} = tmp_ilxlrd;
-    clear tmp_ilxlrd;
-else
-    % Load block for remaining angle traces
-    % initialise the data array
-    vol_traces = zeros(totalvol,n_samples_fullz,size(traces{vol_index_wb},2));
-    
-    % if tottracerun == 0;
-    %     vol_traces = zeros(totalvol,size(traces{vol_index_wb},1),size(traces{vol_index_wb},2));
-    % else
-    %     vol_traces = zeros(totalvol,size(traces{vol_index_wb},1),tottracerun);
-    % end
-
-    vol_count = 1;
-    for i_vol = startvol:volinc:endvol
-        fprintf('reading data no of vol = %d\n',i_vol)
-
-        % Read traces
-        %[~, traces{vol_count}, ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
-        [~, vol_traces(vol_count,:,:), ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
-
-        % Flatten traces to water bottom
-        %traces{vol_count} = traces{vol_count}(win_ind);
-        %vol_traces(vol_count,:,:) = vol_traces(vol_count,win_ind);
-        % truncate the dataset if just running a test for a set number of
-        % traces
-        %     if tottracerun ~= 0;
-        % %         if vol_count == 1;
-        % %             vol_traces = zeros(totalvol,size(traces{vol_count},1),tottracerun);
-        % %         end
-        %         %###########################################################
-        %         % cj test edit resize the dataset temp to test with
-        %         vol_traces(vol_count,:,:) = traces{vol_count}(:,1:tottracerun);
-        %         traces{vol_count} = traces{vol_count}(:,1:tottracerun);
-        %     end
-        
-        % keep a list of the angle values read in, this might need to change
-        % for angle gathers with on a single angle value; it needs to be
-        % assigned to both fields in the job meta file
-        input_angles(vol_count) = (job_meta.angle{i_vol}(2)+job_meta.angle{i_vol}(1))/2;
-        
-        if plot_on == 2
-            figure(1)
-            subplot(1,totalvol,vol_count); imagesc(vol_traces(vol_count,:,:));
-        end
-        
-        vol_count = vol_count + 1;
-    end
-
-    % deal with zeros in the IGmatrix build rather than as a mask as
-    % already zeros, this is just to cover low amp noise
-    %----- Finding the mute and discarding the points outside it by a mask----------------
-    for ii = 1:1:size(vol_traces,3)
-        % mute the low amplitude areas
-        mask = low_amp_mute(vol_traces(:,:,ii)');
-        % apply a small smoother to reduce noise
-        %vol_traces(:,:,ii) = conv2(1,filttraces,vol_traces(:,:,ii),'same');
-        vol_traces(:,:,ii) = vol_traces(:,:,ii) .* mask';
-        
-        %imagesc(vol_traces(:,:,ii));
-        %colormap(gray);
-        %caxis([-500 500]);
-    end    
-
-    % truncate data to make z axis number
-    vol_traces = vol_traces(:,1:maxzout,:);
-    job_meta.n_samples{1} = maxzout;
-end
-clear traces win_sub wb_idx;
-%%
-%==========================================================================================================================
-% now flatten to the water bottom offset plane at a time
-%
-padding = padding + extrapad;
-%
-if job_meta.is_gather == 1
-    for i_vol = 1:totalvol
-        tmp_vol = squeeze(vol_traces(:,i_vol,:));
-        vol_traces(1:size(win_ind,1),i_vol,:) = tmp_vol(win_ind);
-    end
-    % resize the traces to drop the trailing blanks after the shift to the wb
-    vol_traces = vol_traces(1:size(win_ind,1),:,:);
-    % taper the top 25 samples to avoid wb reflection creating artifacts due to
-    % high amplitude
-
-    % need to apply a taper that does not go to zero, make the wavelet try
-    % to match zero and does not work
-    %taper = single([ zeros(floor(padding-5),1)',linspace(0,1,20)])';
-    %vol_traces(1:length(taper),:,:) = bsxfun(@times,vol_traces(1:length(taper),:,:),taper);
-    
-else
-    for i_vol = 1:totalvol
-        tmp_vol = squeeze(vol_traces(i_vol,:,:));
-        % flattern to water bottom
-        vol_traces(i_vol,1:size(win_ind,1),:) = tmp_vol(win_ind);
-    end
-    % resize the traces to drop the trailing blanks after the shift to the wb
-    vol_traces = vol_traces(:,1:size(win_ind,1),:);
-    % taper the top 25 samples to avoid wb reflection creating artifacts due to
-    % high amplitude
-    
-    % need to apply a taper that does not go to zero, make the wavelet try
-    % to match zero and does not work
-    %taper = single([ zeros(floor(padding-5),1)',linspace(0,1,20)]);
-    %vol_traces(:,1:length(taper),:) = bsxfun(@times,vol_traces(:,1:length(taper),:),taper);
-    
-end
-
-
-ns = size(win_ind,1);
-ntraces = size(win_ind,2);
-%
-% inverse taper to apply to the results in the inversion
-%taperrev = single([ zeros(floor(padding-5),1)',linspace(1,0,20)]);
-taperrev = single([ zeros(floor(padding-5),1)',1./(linspace(0,1,20)),ones((ns-(padding+15)),1)']);
-taperrev = [taperrev, taperrev];
-taperrev(isnan(taperrev)) = 0;
-taperrev(isinf(taperrev)) = 0;
-taperrev(taperrev> 10) = 10;
-taperrev = taperrev';
-clear tmp_vol;
-padding = padding - extrapad;
-
-% Test unflatten
-% Unflatten data
-% [ns,ntraces] = size(traces{1});
-% traces_unflat = [traces{1};zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
-% for kk = 1:length(wb_idx)
-%     traces_unflat(:,kk) = circshift(traces_unflat(:,kk),wb_idx(kk));
+% %         wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))));
+% %         % select the angles with the wb on
+% %         tmpwbangs = (tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))))));
+% %         tmpangpickstd = ceil(std(double(tmpwbangs)));
+% %         tmpangpick = floor(mean(tmpwbangs));
+% %         %tmpangpick = floor(mean(tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1)))))));
+% %         pick_wb_ind = find(offset == tmpangpick);
+% %         
+% %         clear tracestest offset_read;
+% % 
+% %         
+% % %         [wb_idxcj] = water_bottom_picker(traces{vol_index_wb}(:,:),0);
+% % %         
+% % %         %pick the water bottom
+% % %         [wb_idxcj] = water_bottom_picker(tracestest{vol_index_wb}(:,:),0);
+% % %         %filter the water bottom pick to make a difference in WB time for
+% % %         %traces that are not picking the wb
+% % %         filtw = [1 2 3 2 1]/9;
+% % %         wb_idxcjfilt = conv(wb_idxcj,filtw,'same');
+% % %         % now make a blank array the size of the wb index array
+% % %         wb_idxcj2 = zeros(1,size(wb_idxcj,2));
+% % %         %now find the difference between the values of the filtered and
+% % %         %unfiltered water bottom indexes, if there is a difference then it is
+% % %         %likely to not be the water bottom as it should be mostly flat on the
+% % %         %gathers
+% % %         wb_idx_diff_ck = abs((wb_idxcj./wb_idxcjfilt)-1);
+% % %         wb_idxcj2(wb_idx_diff_ck < 0.005) =  wb_idxcj(wb_idx_diff_ck < 0.005);
+% % %         
+% % %         %now work out the index locations of the water bottom
+% % %         wb_idx_index = 1:1:size(wb_idxcj,2);
+% % %         %apply a logical index to the index array to give the index of where the wb is picked and less then 10 elsewhere
+% % %         wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10))));
+% % %         % calculate the gather index in each gather by removing the integer
+% % %         % number of gathers from the index number and putting back to all being
+% % %         % the same angle index in each gather ie 1-46,1-46,1-46 etc... and
+% % %         % findingf the average value of all the indexes
+% % %         pick_wb_ind = floor(mean(((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset) - floor((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset)))*length(offset)));
+% % %         %read the offset plane from the input data gathers.
+% % %         %traces{vol_index_wb} = vol_traces(:,offset_read == offset(pick_wb_ind));
+%         
+%         
+%     %end
 % end
-%
-%==========================================================================================================================
-%%
-%---------Wavelets to be used-------------------------------------
-
-%Load wavelets set
-if use_spatial_wavelets == '0'                                                      % Use single wavelet set
-    wavelets = load(strcat(job_meta.wav_directory,'all_wavelets_time.mat'));        % This file gets made by wavelet_average.m 
-else                                                                                % Use Spatially Varying Wavelet Sets
-    algo = '2';                                                                     % FLag for which algorithm to use for spatial wavelets 
-    wavelet_dir_path = job_meta.wav_directory;                                      % Wavelet Directory Path from job meta file
-    wavelets = load_wavelet_spatial(job_meta_path,wavelet_dir_path,i_block,algo);   % Call function to smoothen wavelet spatially by various algorithms and load the wavelet for this block
-end
+% 
+% 
+% % pkey_inc_mode = mode(job_meta.pkey_inc);
+% % skey_inc_mode = mode(job_meta.skey_inc);
+% % 
+% % n_iline = (ilxl_read{vol_index_wb}(:,1)-min(ilxl_read{vol_index_wb}(:,1)))/pkey_inc_mode+1;
+% % n_xline = (ilxl_read{vol_index_wb}(:,2)-min(ilxl_read{vol_index_wb}(:,2)))/skey_inc_mode+1;
+% % skeyn = (max(ilxl_read{vol_index_wb}(:,2))-min(ilxl_read{vol_index_wb}(:,2)))/skey_inc_mode+1;
+% % pkeyn = (max(ilxl_read{vol_index_wb}(:,1))-min(ilxl_read{vol_index_wb}(:,1)))/pkey_inc_mode+1;
+% % lin_ind = ((n_iline-1).*skeyn)+n_xline;
+% 
+% %==========================================================================================================================
+% % Pick water bottom or use a pre picked water bottom horizon
+% if isfield(job_meta, 'wb_path')
+%     %wb_idx = dlmread(job_meta.wb_path,'delimiter','\t');
+%     wb_idx_in = dlmread(job_meta.wb_path);
+%     %wb_idx_in = sortrows(wb_idx_in,[1 2]);
+%     % col 1 inline
+%     % col 2 xline
+%     % col 3 twt
+%     if job_meta.is_gather == 1
+%         [~,locations] = ismember(ilxl_read{1}(1:length(offset):end,:),wb_idx_in(:,1:2),'rows');
+%     else    
+%         [~,locations] = ismember(ilxl_read{1}(1:end,:),wb_idx_in(:,1:2),'rows');    
+%     end
+%     %wb_idx = zeros(size(traces{vol_index_wb},2),1);
+%     zero_loc = locations ~= 0;
+%     %wb_idx
+%     %zero_loc = wb_idx_in(locations(zero_loc),3); comment this line to
+%     %match wavelet estimation - cj 27_02_2015
+%     % but i do not see why this is not just
+%     %wb_idx =  wb_idx_in(locations,3)
+%     xi = (1:size(traces{vol_index_wb},2))';
+%     x = xi(zero_loc)';
+%     wb_idx = interp1(x,wb_idx_in(locations(zero_loc),3),xi);
+%     clear wb_idx_in
+%     %min_il = min(ilxl_read{vol_index_wb}(:,1));
+%     %max_il = max(ilxl_read{vol_index_wb}(:,1));
+%     %min_xl = min(ilxl_read{vol_index_wb}(:,2));
+%     %max_xl = max(ilxl_read{vol_index_wb}(:,2));
+%     %wb_idx2 = wb_idx(wb_idx(:,1) >= min_il & wb_idx(:,1) <= max_il & wb_idx(:,2) >= min_xl & wb_idx(:,2) <= max_xl,:);
+%     %    wb_idx = wb_idx(wb_idx(:,1) >= min_il & wb_idx(:,1) <= (max_il+1) & wb_idx(:,2) >= min_xl & wb_idx(:,2) <= (max_xl+1),:);
+%     %   wb_idx(:,3) = wb_idx(:,3)./(job_meta.s_rate/1000);
+%     wb_idx = (wb_idx./(job_meta.s_rate/1000))';
+%     
+%     wb_idx = round(wb_idx-padding);
+%     wb_idx(isnan(wb_idx)) = 1;
+%     wb_idx(wb_idx < 1) = 1;
+%     win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
+%     
+%     win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
+%         job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
+% else
+%     [wb_idx] = water_bottom_picker(traces{vol_index_wb},padding);
+%     wb_idx(wb_idx < 0) = 1;
+%     win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
+%                                                                       
+%     win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
+%     job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
+%    
+% end
+% %%
+% %==========================================================================================================================
+% % read in all the data and decimate as required (allready read in for gathers)
+% if job_meta.is_gather == 1
+%     % reshape the gather array to the same 3d matrix as the angle volumes
+%     %vol_tracescjtmp = reshape(vol_traces,size(traces{vol_index_wb},1),length(offset),size(traces{vol_index_wb},2));
+%     %vol_traces = vol_tracescjtmp(:,(startvol:volinc:endvol),:);
+%     %clear vol_tracescjtmp;
+%     % this can just be vol_traces_cjtmp is not needed, just put in to check
+%     % debug stages
+%     vol_traces = reshape(vol_traces,size(traces{vol_index_wb},1),length(offset),size(traces{vol_index_wb},2));
+%     
+%     % try applying a running average to the data to smooth out variations
+%     % on the angle gathers
+%         
+%     filttraces = [1 1 1]/3;
+%     %----- Finding the mute and discarding the points outside it by a mask----------------
+%     for ii = 1:1:size(vol_traces,3)
+%         % mute the low amplitude areas
+%         mask = low_amp_mute(vol_traces(:,:,ii));
+%         % apply a small smoother to reduce noise
+% %        vol_traces(:,:,ii) = conv2(1,filttraces,vol_traces(:,:,ii),'same');
+%         vol_traces(:,:,ii) = vol_traces(:,:,ii) .* mask;
+%         %imagesc(vol_traces(:,:,ii));
+%         %colormap(gray);
+%         %caxis([-500 500]);
+%     end
+%     
+%     %drop the angles that are not needed
+%     % note the 3 trace average above to allow 2:1 decimation with a bit of
+%     % anti aliasing, not perfect but ...
+%     vol_traces = vol_traces(:,(startvol:volinc:endvol),:);    
+%     
+%     input_angles = double(offset(startvol:volinc:endvol));
+%     % resize the ilxl data to drop to stack fold
+%     tmp_ilxlrd = ilxl_read{vol_index_wb}(1:length(offset):end,:);
+%     ilxl_read{vol_index_wb} = tmp_ilxlrd;
+%     clear tmp_ilxlrd;
+% else
+%     % Load block for remaining angle traces
+%     % initialise the data array
+%     vol_traces = zeros(totalvol,n_samples_fullz,size(traces{vol_index_wb},2));
+%     
+%     % if tottracerun == 0;
+%     %     vol_traces = zeros(totalvol,size(traces{vol_index_wb},1),size(traces{vol_index_wb},2));
+%     % else
+%     %     vol_traces = zeros(totalvol,size(traces{vol_index_wb},1),tottracerun);
+%     % end
+% 
+%     vol_count = 1;
+%     for i_vol = startvol:volinc:endvol
+%         fprintf('reading data no of vol = %d\n',i_vol)
+% 
+%         % Read traces
+%         %[~, traces{vol_count}, ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
+%         [~, vol_traces(vol_count,:,:), ~, ~] = node_segy_read(job_meta_path,num2str(i_vol),i_block);
+% 
+%         % Flatten traces to water bottom
+%         %traces{vol_count} = traces{vol_count}(win_ind);
+%         %vol_traces(vol_count,:,:) = vol_traces(vol_count,win_ind);
+%         % truncate the dataset if just running a test for a set number of
+%         % traces
+%         %     if tottracerun ~= 0;
+%         % %         if vol_count == 1;
+%         % %             vol_traces = zeros(totalvol,size(traces{vol_count},1),tottracerun);
+%         % %         end
+%         %         %###########################################################
+%         %         % cj test edit resize the dataset temp to test with
+%         %         vol_traces(vol_count,:,:) = traces{vol_count}(:,1:tottracerun);
+%         %         traces{vol_count} = traces{vol_count}(:,1:tottracerun);
+%         %     end
+%         
+%         % keep a list of the angle values read in, this might need to change
+%         % for angle gathers with on a single angle value; it needs to be
+%         % assigned to both fields in the job meta file
+%         input_angles(vol_count) = (job_meta.angle{i_vol}(2)+job_meta.angle{i_vol}(1))/2;
+%         
+%         if plot_on == 2
+%             figure(1)
+%             subplot(1,totalvol,vol_count); imagesc(vol_traces(vol_count,:,:));
+%         end
+%         
+%         vol_count = vol_count + 1;
+%     end
+% 
+%     % deal with zeros in the IGmatrix build rather than as a mask as
+%     % already zeros, this is just to cover low amp noise
+%     %----- Finding the mute and discarding the points outside it by a mask----------------
+%     for ii = 1:1:size(vol_traces,3)
+%         % mute the low amplitude areas
+%         mask = low_amp_mute(vol_traces(:,:,ii)');
+%         % apply a small smoother to reduce noise
+%         %vol_traces(:,:,ii) = conv2(1,filttraces,vol_traces(:,:,ii),'same');
+%         vol_traces(:,:,ii) = vol_traces(:,:,ii) .* mask';
+%         
+%         %imagesc(vol_traces(:,:,ii));
+%         %colormap(gray);
+%         %caxis([-500 500]);
+%     end    
+% 
+%     % truncate data to make z axis number
+%     vol_traces = vol_traces(:,1:maxzout,:);
+%     job_meta.n_samples{1} = maxzout;
+% end
+% clear traces win_sub wb_idx;
+% %%
+% %==========================================================================================================================
+% % now flatten to the water bottom offset plane at a time
+% %
+% padding = padding + extrapad;
+% 
+% %figure(10);imagesc(reshape(vol_traces,2001,:));colormap(gray);caxis([-50 50]);
+% %
+% if job_meta.is_gather == 1
+%     for i_vol = 1:totalvol
+%         tmp_vol = squeeze(vol_traces(:,i_vol,:));
+%         vol_traces(1:size(win_ind,1),i_vol,:) = tmp_vol(win_ind);
+%     end
+%     % resize the traces to drop the trailing blanks after the shift to the wb
+%     vol_traces = vol_traces(1:size(win_ind,1),:,:);
+%     % taper the top 25 samples to avoid wb reflection creating artifacts due to
+%     % high amplitude
+% 
+%     % need to apply a taper that does not go to zero, make the wavelet try
+%     % to match zero and does not work
+%     %taper = single([ zeros(floor(padding-5),1)',linspace(0,1,20)])';
+%     %vol_traces(1:length(taper),:,:) = bsxfun(@times,vol_traces(1:length(taper),:,:),taper);
+%     
+% else
+%     for i_vol = 1:totalvol
+%         tmp_vol = squeeze(vol_traces(i_vol,:,:));
+%         % flattern to water bottom
+%         vol_traces(i_vol,1:size(win_ind,1),:) = tmp_vol(win_ind);
+%     end
+%     % resize the traces to drop the trailing blanks after the shift to the wb
+%     vol_traces = vol_traces(:,1:size(win_ind,1),:);
+%     % taper the top 25 samples to avoid wb reflection creating artifacts due to
+%     % high amplitude
+%     
+%     % need to apply a taper that does not go to zero, make the wavelet try
+%     % to match zero and does not work
+%     %taper = single([ zeros(floor(padding-5),1)',linspace(0,1,20)]);
+%     %vol_traces(:,1:length(taper),:) = bsxfun(@times,vol_traces(:,1:length(taper),:),taper);
+%     
+% end
+% vol_traces = vol_traces(:,:,100:100:800);
+% win_ind = win_ind(:,100:100:800);
+% 
+% 
+% ns = size(win_ind,1);
+% ntraces = size(win_ind,2);
+% %
+% % inverse taper to apply to the results in the inversion
+% %taperrev = single([ zeros(floor(padding-5),1)',linspace(1,0,20)]);
+% taperrev = single([ zeros(floor(padding-5),1)',1./(linspace(0,1,20)),ones((ns-(padding+15)),1)']);
+% taperrev = [taperrev, taperrev];
+% taperrev(isnan(taperrev)) = 0;
+% taperrev(isinf(taperrev)) = 0;
+% taperrev(taperrev> 10) = 10;
+% taperrev = taperrev';
+% clear tmp_vol;
+% padding = padding - extrapad;
+% 
+% % Test unflatten
+% % Unflatten data
+% % [ns,ntraces] = size(traces{1});
+% % traces_unflat = [traces{1};zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
+% % for kk = 1:length(wb_idx)
+% %     traces_unflat(:,kk) = circshift(traces_unflat(:,kk),wb_idx(kk));
+% % end
+% %
+% %==========================================================================================================================
+% %%
+% %---------Wavelets to be used-------------------------------------
+% 
+% %Load wavelets set
+% if use_spatial_wavelets == '0'                                                      % Use single wavelet set
+%     wavelets = load(strcat(job_meta.wav_directory,'all_wavelets_time.mat'));        % This file gets made by wavelet_average.m 
+% else                                                                                % Use Spatially Varying Wavelet Sets
+%     algo = '2';                                                                     % FLag for which algorithm to use for spatial wavelets 
+%     wavelet_dir_path = job_meta.wav_directory;                                      % Wavelet Directory Path from job meta file
+%     wavelets = load_wavelet_spatial(job_meta_path,wavelet_dir_path,i_block,algo);   % Call function to smoothen wavelet spatially by various algorithms and load the wavelet for this block
+% end
 %%
 ns_wavelet = size(wavelets.all_wavelets_time{1},1)-1;                               % Number of samples in a wavelet?
 hns_wavelet = floor(ns_wavelet/2);                                                  % Half of number of samples?
@@ -673,7 +659,6 @@ first_iter = 1;
 if tottracerun ~= 0;
     ntraces = tottracerun;
 end
-
 last_iter = ntraces;
 
 % Begin inversion loop
@@ -902,7 +887,8 @@ results_out{resultno,1} = strcat('digi_intercept',testdiscpt);
 %results_out{2,2} = digi_intercept;
 results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
 % Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*ava(1:ns,:);
+%results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*ava(1:ns,:);
+results_out{resultno,2} = 1000.*ava(1:ns,:);
 results_out{resultno,3} = 0;
 resultno = resultno + 1;
 
@@ -910,7 +896,8 @@ results_out{resultno,1} = strcat('digi_gradient',testdiscpt);
 %results_out{3,2} = digi_gradient;
 results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
 % Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*ava(1+ns:end,:);
+%results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*ava(1+ns:end,:);
+results_out{resultno,2} = 1000.*ava(1+ns:end,:);
 results_out{resultno,3} = 0;
 resultno = resultno + 1;
 
@@ -919,24 +906,8 @@ results_out{resultno,1} = strcat('digi_minimum_energy_eer_projection',testdiscpt
 digi_minimum_energy_eer_projection = [bsxfun(@times,ava(1:ns,:),cosd(chi))+bsxfun(@times,ava(1+ns:end,:),sind(chi));zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
 results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
 % Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_minimum_energy_eer_projection(1:ns,:);
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
-results_out{resultno,1} = strcat('digi_maximum_energy_eer_projection',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-digi_maximum_energy_eer_projection = [bsxfun(@times,ava(1:ns,:),cosd(chi-90))+bsxfun(@times,ava(1+ns:end,:),sind(chi-90));zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_maximum_energy_eer_projection(1:ns,:);
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
-results_out{resultno,1} = strcat('digi_ItimesG',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*(ava(1+ns:end,:).*ava(1:ns,:));
+%results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_minimum_energy_eer_projection(1:ns,:);
+results_out{resultno,2} = 1000.*digi_minimum_energy_eer_projection(1:ns,:);
 results_out{resultno,3} = 0;
 resultno = resultno + 1;
 
@@ -946,7 +917,8 @@ if needconf == 1;
     digi_confidence = [digi_confidence;zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
     results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
     % Unflatten data using the window index
-    results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_confidence(1:ns,:);
+    %results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_confidence(1:ns,:);
+    results_out{resultno,2} = 1000.*digi_confidence(1:ns,:);
     results_out{resultno,3} = 0;
     resultno = resultno + 1;
 end
@@ -970,6 +942,7 @@ if output_std == 1;
 end
 %%
 % segy write function
+job_meta.output_dir = './';
 if exist(strcat(job_meta.output_dir,'digi_results/'),'dir') == 0
     output_dir = strcat(job_meta.output_dir,'digi_results/');
     mkdir(output_dir);    

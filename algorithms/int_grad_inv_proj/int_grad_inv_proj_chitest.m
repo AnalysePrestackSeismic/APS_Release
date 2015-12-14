@@ -27,9 +27,9 @@ function [] = int_grad_inv_proj(job_meta_path,i_block,startvol,volinc,endvol,tot
 %   Inputs:
 %       job_mat_path = path of metadata .mat file.
 %       i_block = current block to be processed.
-%       startvol = Index number of the first angle trace/volume to read
-%       volinc = Index number angle trace/volume increment
-%       endvol = Index number of the last angle trace/volume to read
+%       startvol = number of the first angle trace/volume to read
+%       volinc = angle trace/volume increment
+%       endvol = number of the last angle trace/volume to read
 %       tottracerun = number of traces to output, 0 = all, and il1234 would
 %       only output inline 1234
 %       maxzout = To be given in samples if this is initialized as 0 this will be
@@ -126,18 +126,10 @@ if tottracerun == 0
     
     ebdichdr = ['digi parameters: wsmooth ',num2str(wsmooth),' eer_weight ',num2str(eer_weight_out),' tolr ',tol_out];
     if useselectemode == 1;
-        if maxzout==0
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
+        testdiscpt = ['_w_tolrt1e3__eer_weight_',num2str(eer_weight_out),'_il',num2str(requiredinline),'_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
     else
-        if maxzout==0
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_spw_',num2str(use_spatial_wavelets)];
-        else
-            testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol),'_maxz_',num2str(maxzout),'_spw_',num2str(use_spatial_wavelets)];
-        end
-    end
+        testdiscpt = ['_w_range_',num2str(startvol),'_',num2str(volinc),'_',num2str(endvol)];
+    end    
 else
     eer_weight_out = num2str((eer_weight*1000));
     %eer_weight_out = regexprep(eer_weight_out, '0.', '');
@@ -335,21 +327,8 @@ if isfield(job_meta, 'wb_path')
 else
     [wb_idx] = water_bottom_picker(traces{vol_index_wb},padding);
     wb_idx(wb_idx < 0) = 1;
-    [max_wb,max_wb_ind] = max(wb_idx);
-    wb_idx(max_wb_ind) = 0;
-    [max_wb2,max_wb_ind2] = max(wb_idx);
-    
-    if max_wb - max_wb2 > 20
-        max_wb_idx = max_wb2;
-        wb_idx(max_wb_ind) = max_wb2;
-    else
-        wb_idx(max_wb_ind) = max_wb;
-        max_wb_idx = max_wb;
-    end
-    
-    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max_wb_idx)');   
-    
-    
+    win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
+                                                                      
     win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
     job_meta.n_samples{vol_index_wb}*(size(traces{vol_index_wb},2)-1)));
    
@@ -628,9 +607,11 @@ end
 %%
 % start building the inversion operators
 % Chi model
+chi_slope=-3;
+chi_int=40;
 switch chi_model_type
     case 'empirical' 
-        chi = (job_meta.s_rate/1e6)*(0:1:ns-1)'.*-2 + 19;
+        chi = (job_meta.s_rate/1e6)*(0:1:ns-1)'.*chi_slope + chi_int;
 
     case 'raw'
         
@@ -673,7 +654,6 @@ first_iter = 1;
 if tottracerun ~= 0;
     ntraces = tottracerun;
 end
-
 last_iter = ntraces;
 
 % Begin inversion loop
@@ -788,13 +768,13 @@ if ilxl_read{vol_index_wb}(kk,1) == requiredinline;
     else     
         %[ava(:,kk),~] = lsqr(IGiter,data,tol,iter,[],[],cjmodel);
         %[ava_tmp,lsqflag,relres,fiternotmp,residvec] = lsqr(IGiter,data,tol,iter,[],[]);
-        if spgl == 1
-            %opts = spgSetParms('optTol',1e-4);
-            opts = spgSetParms('verbosity',0);
-            [ava_tmp,r,g,info] = spgl1(IGiter, data, 0, 1997, [], opts );
-        else
+%         if spgl == 1
+%             %opts = spgSetParms('optTol',1e-4);
+%             opts = spgSetParms('verbosity',0);
+%             [ava_tmp,r,g,info] = spgl1(IGiter, data, 0, 1997, [], opts );
+%         else
             [ava_tmp,lsqflag,~,fiternotmp] = lsqr(IGiter,data,tol,iter,[],[]);
-        end
+%         end
         %residcount(1:length(residvec),kk) = residvec;
         %apply band pass filter to the output
         ava_zeros = ava_tmp == 0;
@@ -923,23 +903,6 @@ results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_minimum_energy_eer_pr
 results_out{resultno,3} = 0;
 resultno = resultno + 1;
 
-results_out{resultno,1} = strcat('digi_maximum_energy_eer_projection',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-digi_maximum_energy_eer_projection = [bsxfun(@times,ava(1:ns,:),cosd(chi-90))+bsxfun(@times,ava(1+ns:end,:),sind(chi-90));zeros(job_meta.n_samples{vol_index_wb}-ns,ntraces)];
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*digi_maximum_energy_eer_projection(1:ns,:);
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
-results_out{resultno,1} = strcat('digi_ItimesG',testdiscpt); 
-%results_out{4,2} = digi_minimum_energy_eer_projection;
-results_out{resultno,2} = zeros(job_meta.n_samples{vol_index_wb},ntraces);
-% Unflatten data using the window index
-results_out{resultno,2}(win_ind(:,1:ntraces)) = 1000.*(ava(1+ns:end,:).*ava(1:ns,:));
-results_out{resultno,3} = 0;
-resultno = resultno + 1;
-
 if needconf == 1;
     results_out{resultno,1} = strcat('digi_confidence',testdiscpt);
     %results_out{5,2} = digi_confidence;
@@ -971,10 +934,10 @@ end
 %%
 % segy write function
 if exist(strcat(job_meta.output_dir,'digi_results/'),'dir') == 0
-    output_dir = strcat(job_meta.output_dir,'digi_results/');
+    output_dir = strcat(job_meta.output_dir,'digi_results_ava_test2/');
     mkdir(output_dir);    
 else
-    output_dir = strcat(job_meta.output_dir,'digi_results/');
+    output_dir = strcat(job_meta.output_dir,'digi_results_ava_test2/');
 end
 
 i_block = str2double(i_block);
