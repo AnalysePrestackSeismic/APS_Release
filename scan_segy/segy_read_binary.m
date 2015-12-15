@@ -45,8 +45,8 @@ tkey_length = skey_length+1;
 is_gather_length = tkey_length+1;
 traces_length = is_gather_length+1;
 
-fid = fopen(seismic_mat_path,'r');                          % Open .mat_orig_lite File for reading
-message = ferror(fid); 
+fid = fopen(seismic_mat_path,'r');% Open .mat_orig_lite File for reading
+message = ferror(fid) ;
 tmp_seismic = fread(fid,'double');                          % Read the oppened file
 
 %------------------CREATING THE STRUCTURE TO OUTPUT-------------------
@@ -71,6 +71,10 @@ else
 
 end
 %---------------------------------------------------------------------
+% a qc of the integrity of the file is working out if the number of bytes
+% corresponds to the number of traces , so runn below and look for non
+% integer answers
+%seismic.trace_ilxl_bytes(1:(end-1),9) = (seismic.trace_ilxl_bytes(2:end,3)-seismic.trace_ilxl_bytes(1:(end-1),3)) ./  ( (((seismic.trace_ilxl_bytes(1:(end-1),7)- seismic.trace_ilxl_bytes(1:(end-1),6))./seismic.trace_ilxl_bytes(1:(end-1),8))+1) .*((seismic.n_samples*4)+240));
 
 fclose(fid);                                                % Close File
 end

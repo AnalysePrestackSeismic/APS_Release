@@ -147,7 +147,8 @@ if blocktr > 1
                             tkey_inc_prev = tkey_inc;
                         else % cur_inc is not 0
                             count = count + 1;
-                            compress_ilxl_bytes(count,:) = [ pkey skey tbyte skey cur_inc tkey_min tkey_max tkey_inc];
+                            %compress_ilxl_bytes(count,:) = [ pkey skey tbyte skey cur_inc tkey_min tkey_max tkey_inc];
+                            compress_ilxl_bytes(count,:) = [ pkey skey tbyte skey 1 tkey_min tkey_max tkey_inc];
                             skey_inc = cur_inc;
                             skey_prev = skey;
                             tkey_min_prev = tkey_min;
@@ -156,7 +157,8 @@ if blocktr > 1
                         end
                     end
                 else % cur_inc == skey_inc
-                    compress_ilxl_bytes(count,4) = skey;
+                    %compress_ilxl_bytes(count,4) = skey;
+                    compress_ilxl_bytes(count,4:5) = [ skey cur_inc ];
                     skey_prev = skey;
                     tkey_min_prev = tkey_min;
                     tkey_max_prev = tkey_max;

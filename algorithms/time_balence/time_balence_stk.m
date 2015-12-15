@@ -1,44 +1,18 @@
 function trim_data_filt = time_balence_stk( trim_data )
-%% ------------------ Disclaimer  ------------------
-% 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) makes no representation or warranty, express or implied, in 
-% respect to the quality, accuracy or usefulness of this repository. The code
-% is this repository is supplied with the explicit understanding and 
-% agreement of recipient that any action taken or expenditure made by 
-% recipient based on its examination, evaluation, interpretation or use is 
-% at its own risk and responsibility.
-% 
-% No representation or warranty, express or implied, is or will be made in 
-% relation to the accuracy or completeness of the information in this 
-% repository and no responsibility or liability is or will be accepted by 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) in relation to it.
-%% ------------------ License  ------------------ 
-% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
-%% github
-% https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-% time_balence: function to scales a section from the envelope 
-% of the amplitudes
-%   Arguments:
-%       trim_data = a matrix containing a seismic section 
-%	[rows: samples, cols: secondary key] 
-%   
-%   Outputs:
-%       trim_data_filt = scaled version of trim_data 
-%
-%   Writes to Disk:
-%       nothing 
+%% Defination: TIME_BALENCE scales a gather or setion from the envelope of the amplitudes
+% Input:  
+% Output:
+% Writes to Disk:
 
+%to make the envelope tend to the value +/- 2000
+%   Detailed explanation goes here
+%%
 filt_smo =  ones(1,3)/3;
 %filttraces = [1 2 2 3 3 3 2 2 1]/19;
 trim_data_filt = trim_data;
 
 for ckk = 1:size(trim_data,2)
-    
+%#####################################    
 % find the max of the data across the gather and smooth
 td_max = trim_data(:,ckk);
 %td_max =  conv(td_max,filttraces,'same');
@@ -65,7 +39,7 @@ diffsign = [1;diffsign];
 % finds the mins in the max dataset
 mdiffsign(sign(max_2nd_deriv) <= 0) = 0;
 mdiffsign = [1;mdiffsign];
-
+%##################################### 
 %use the peaks logical to get the values and indexes to then interpolate to
 %make and envelope which includes the signal, but preserves the wiggles in
 %the dataset

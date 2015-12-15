@@ -27,7 +27,7 @@ function liveblocks = select_live_blocks(job_meta_path)
 
 job_meta = load(job_meta_path);
 
-i_block = 1;
+%i_block = 1;
 
 if job_meta.is_gather == 0
     loop_index = size(job_meta.files,1);
@@ -39,8 +39,8 @@ i_counter = 1;
 
 %for i_block = 1:1:size(job_meta.files,1)
 
-if job_meta.is_gather == 0
-    for i_block = 1:1:size(job_meta.files,2)
+% if job_meta.is_gather == 0
+    for i_block = 1:1:loop_index
         seismic_mat_path = [job_meta.paths{1}, job_meta.files{i_block}];
         seismic = segy_read_binary(seismic_mat_path);
 
@@ -57,25 +57,25 @@ if job_meta.is_gather == 0
             end      
         end 
     end
-else
-    for i_block = 1:1:size(job_meta.files,2)
-        seismic_mat_path = [job_meta.paths{1}, job_meta.files{i_block}];
-        seismic = segy_read_binary(seismic_mat_path);
-        
-        for i_key = 1:1:size(job_meta.block_keys,1)
-            expand_keys = expand_pst_keys(job_meta.block_keys(i_key,:),...
-                job_meta.pkey_inc(1));
-            
-            is_live = lookup_block(seismic,expand_keys);
-            
-            if is_live > 0
-                liveblocks(i_counter,:) = i_key;
-                %fprintf('Liveblock %d...\n',i_key)
-                i_counter = i_counter + 1;
-            end
-        end
-    end
-end
+% else
+%     for i_block = 1:1:size(job_meta.files,2)
+%         seismic_mat_path = [job_meta.paths{1}, job_meta.files{i_block}];
+%         seismic = segy_read_binary(seismic_mat_path);
+%         
+%         for i_key = 1:1:size(job_meta.block_keys,1)
+%             expand_keys = expand_pst_keys(job_meta.block_keys(i_key,:),...
+%                 job_meta.pkey_inc(1));
+%             
+%             is_live = lookup_block(seismic,expand_keys);
+%             
+%             if is_live > 0
+%                 liveblocks(i_counter,:) = i_key;
+%                 %fprintf('Liveblock %d...\n',i_key)
+%                 i_counter = i_counter + 1;
+%             end
+%         end
+%     end
+% end
 
 liveblocks = unique(liveblocks);
 %end

@@ -1,4 +1,4 @@
-function [block_keys,n_blocks] = segy_make_blocks(job_meta_path)
+function [block_keys,n_blocks] = segy_make_blocks(job_meta_path,varargin)
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -36,6 +36,11 @@ function [block_keys,n_blocks] = segy_make_blocks(job_meta_path)
 %       anggath = 1 for angle gathers and anything else for offset gathers
 %       shots might have a different number
 %       filename = Name of Segy File
+%   Optional arguments:
+%       aperture = number of inlines and crosslines to overlap
+%       inlines per block = force number of inlines per block
+%       crosslines per block = force number of crosslines per block
+%       (defaults to number of inlines per block)
 %
 %   Note: Typical IL/XL byte locations: 189 & 193.
 %   Offset byte location is typically 37 
@@ -50,35 +55,53 @@ function [block_keys,n_blocks] = segy_make_blocks(job_meta_path)
 %%
     job_meta = load(job_meta_path);
     
-    % this is the size of memory that is defined per block, needs to make
-    % sure that the n cores per node * gigabytes_per_block is less than the
-    % memory per node
     
-    %gigabytes_per_block = 1.4;
-    gigabytes_per_block = 2;
-
-    total_blocks = ceil(sum(job_meta.vol_traces.*((cell2mat(job_meta.n_samples)'*4)+240)/1024/1024/1024)/gigabytes_per_block);
-
-    if total_blocks < 1089;
-        if total_blocks < 288;
-            total_blocks = 576;
-        else
-            total_blocks = 1089;
-        end
+    aperture=0; pkey_inc=0; skey_inc=0;
+    
+    if size(varargin,2) >= 1 
+        aperture = varargin{1};
     end
     
-  
-    %work out if this means that there are enough traces in a block
-
-    pkey_blocks = ceil(sqrt(total_blocks));
-    skey_blocks = pkey_blocks;
-    %tkey_blocks = 1;
-
-    % Need to correct
-    %pkey_inc = floor((mode(job_meta.pkey_max) - mode(job_meta.pkey_min))/pkey_blocks);
-    pkey_inc = floor(((mode(job_meta.pkey_max) - mode(job_meta.pkey_min))/pkey_blocks)/job_meta.pkey_inc)*job_meta.pkey_inc;
-    %skey_inc = floor((mode(job_meta.skey_max) - mode(job_meta.skey_min))/skey_blocks);
-    skey_inc = floor(((mode(job_meta.skey_max) - mode(job_meta.skey_min))/skey_blocks)/job_meta.skey_inc)*job_meta.skey_inc;
+    if size(varargin,2) >= 2 
+        pkey_inc = varargin{2};
+        skey_inc = pkey_inc;
+    end
+    
+    if size(varargin,2) >= 3
+        skey_inc = varargin{3};
+    end
+    
+    if pkey_inc == 0
+        % this is the size of memory that is defined per block, needs to make
+        % sure that the n cores per node * gigabytes_per_block is less than the
+        % memory per node
+        
+        gigabytes_per_block = 2;
+        
+        total_blocks = ceil(sum(job_meta.vol_traces.*((cell2mat(job_meta.n_samples)'*4)+240)/1024/1024/1024)/gigabytes_per_block);
+        
+        if total_blocks < 1104;
+            if total_blocks < 1000;
+                total_blocks = 1006;
+            else
+                total_blocks = 1102;
+            end
+        end
+        
+        
+        %work out if this means that there are enough traces in a block
+        
+        pkey_blocks = ceil(sqrt(total_blocks));
+        skey_blocks = pkey_blocks;
+        %tkey_blocks = 1;
+        
+        % Need to correct
+        %pkey_inc = floor((mode(job_meta.pkey_max) - mode(job_meta.pkey_min))/pkey_blocks);
+        pkey_inc = floor(((mode(job_meta.pkey_max) - mode(job_meta.pkey_min))/pkey_blocks)/job_meta.pkey_inc)*job_meta.pkey_inc;
+        %skey_inc = floor((mode(job_meta.skey_max) - mode(job_meta.skey_min))/skey_blocks);
+        skey_inc = floor(((mode(job_meta.skey_max) - mode(job_meta.skey_min))/skey_blocks)/job_meta.skey_inc)*job_meta.skey_inc;
+        
+    end
     
     if pkey_inc == 0
         pkeys_min = min(job_meta.pkey_min);
@@ -119,7 +142,7 @@ function [block_keys,n_blocks] = segy_make_blocks(job_meta_path)
     %skeys_max = skeys_max';
     skeys_max = skeys_max(:);
 
-    block_keys = [pkeys_min, pkeys_max, skeys_min, skeys_max];
+    block_keys = [pkeys_min-aperture, pkeys_max+aperture, skeys_min-aperture, skeys_max+aperture];
     n_blocks = size(block_keys,1);    
     
 end

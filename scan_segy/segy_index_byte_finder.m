@@ -22,11 +22,11 @@ function vol_keys = segy_index_byte_finder(job_meta_path,keys,vol_index)
 % https://github.com/AnalysePrestackSeismic/
 %% ------------------ FUNCTION DEFINITION ---------------------------------
 %   segy_index_byte_finder: report back byte locations of keys searched for
-%   geometry/file structure. Expands compressed trace_ilxl_bytes
+%   geometry/file structure. Expands compressed trace_ilxl_bytes.
 %   
 %   Arguments:  
 %       job_meta_path = path of segy file
-%       keys = inline and crosslines to look-up byte locations for
+%       keys = inlines and crosslines to look-up byte locations for
 %       vol_index = integer specifying which volume
 %
 %   Outputs:
@@ -38,8 +38,6 @@ function vol_keys = segy_index_byte_finder(job_meta_path,keys,vol_index)
 %%
 job_meta = load(job_meta_path);
 vol_index = str2double(vol_index);
-% loop over all volumes
-i_block = 1;
 
 if job_meta.is_gather == 0
     loop_index = size(job_meta.files,1);
@@ -47,14 +45,20 @@ else
     loop_index = size(job_meta.files,2);
 end
 
+% loop over all blocks for a particular volume (defined by vol_index)
+i_block = 1;
 for i_files = 1:1:loop_index
     if strfind(job_meta.files{i_files},job_meta.volumes{vol_index})
-        seismic = segy_read_binary(strcat(job_meta.paths{1},job_meta.files{i_files}));
-
+        seismic = segy_read_binary(strcat(job_meta.paths{1},job_meta.files{i_files}));        
+        
+        %test to look for missing offset keys that are in the file and byte
+        %location is correct
+        %seismic.trace_ilxl_bytes(1:(end-1),9) = (seismic.trace_ilxl_bytes(2:end,3)-seismic.trace_ilxl_bytes(1:(end-1),3)) ./  ( (((seismic.trace_ilxl_bytes(1:(end-1),7)- seismic.trace_ilxl_bytes(1:(end-1),6))./seismic.trace_ilxl_bytes(1:(end-1),8))+1) .*((seismic.n_samples*4)+240));
+        
         expand_keys = expand_pst_keys(keys,...
             job_meta.pkey_inc(vol_index),job_meta.skey_inc(vol_index));
 
-        keys_found = lookup_byte(seismic,expand_keys);
+        keys_found = lookup_byte(seismic,expand_keys); % could save memory by overwriting expand_keys
         if size(keys_found,2) == 3 || size(keys_found,2) == 4; % no entry if it does not occur in the block
             key_logic = keys_found(:,3) ~= 0;
             vol_keys{i_block,1} = keys_found(key_logic,:);
@@ -71,6 +75,9 @@ end
 
 end
 
+% Starting and ending inlines and crosslines are stored in job_meta
+% Col 1 Start IL, Col 2 End IL, Col 3 Start XL, Col 4 End XL
+% Function expands them based on the inline and crossline increment
 function expand_keys = expand_pst_keys(keys,pkey_inc,skey_inc)
     %pkey_inc = mode(diff(seismic.trace_ilxl_bytes(:,1)));
     expand_pkeys = keys(1):pkey_inc:keys(2);
@@ -78,55 +85,51 @@ function expand_keys = expand_pst_keys(keys,pkey_inc,skey_inc)
     %need to add key template for columns instead of numbering 5
     %skey_inc = mode(seismic.trace_ilxl_bytes(:,5));
     expand_skeys = keys(3):skey_inc:keys(4);
-
+    
     expand_pkeys = repmat(expand_pkeys,size(expand_skeys,2),1);
     expand_skeys = repmat(expand_skeys,size(expand_pkeys,2),1)';
 
     expand_keys = [expand_pkeys(:),expand_skeys(:)];
 end
 
+% Once the keys are expanded need to lookup byte location in SEGY files
 function expand_keys = lookup_byte(seismic,expand_keys)
-%
-for i_key = 1:1:size(expand_keys,1)
-    il_rows = seismic.trace_ilxl_bytes(:,1) == expand_keys(i_key,1);
-    
-    if sum(il_rows) > 0
-        il_found = seismic.trace_ilxl_bytes(il_rows,:);
-        xl_rows = (il_found(:,2) <= expand_keys(i_key,2)) & (il_found(:,4) >= expand_keys(i_key,2));
-        
-        if sum(xl_rows) > 0
-            xl_found = il_found(xl_rows,:);
-            [xl,ind] = min(xl_found(:,2));
-            check_xl = (expand_keys(i_key,2) - xl)/xl_found(ind,5);
-            
-            bytes_per_sample = 4;
-            trc_head = 240;
-            trc_length = seismic.n_samples*bytes_per_sample;
-            
-            if seismic.is_gather == 0;
-                % calculate number of traces away from starting byte
-                n_traces_away = check_xl;
-                n_bytes_away = n_traces_away*(trc_length+trc_head);
-                expand_keys(i_key,3) = xl_found(ind,3)+n_bytes_away;
+    for i_key = 1:1:size(expand_keys,1)
+        il_rows = seismic.trace_ilxl_bytes(:,1) == expand_keys(i_key,1);
+
+        if sum(il_rows) > 0
+            il_found = seismic.trace_ilxl_bytes(il_rows,:);
+            xl_rows = (il_found(:,2) <= expand_keys(i_key,2)) & (il_found(:,4) >= expand_keys(i_key,2));
+
+            if sum(xl_rows) > 0
+                xl_found = il_found(xl_rows,:);
+                [xl,ind] = min(xl_found(:,2));
+                check_xl = (expand_keys(i_key,2) - xl)/xl_found(ind,5);
+
+                bytes_per_sample = 4;
+                trc_head = 240;
+                trc_length = seismic.n_samples*bytes_per_sample;
+
+                if seismic.is_gather == 0;
+                    % calculate number of traces away from starting byte
+                    n_traces_away = check_xl;
+                    n_bytes_away = n_traces_away*(trc_length+trc_head);
+                    expand_keys(i_key,3) = xl_found(ind,3)+n_bytes_away;
+                else
+                    n_offsets = (xl_found(:,7)-xl_found(:,6))/xl_found(:,8);
+                    n_offsets = sum(n_offsets(:,1))+(size(n_offsets,1));
+                    n_traces_away = check_xl*n_offsets;
+                    n_bytes_away = n_traces_away*(trc_length+trc_head);
+                    expand_keys(i_key,3) = xl_found(ind,3)+n_bytes_away;
+                    expand_keys(i_key,4) = n_offsets;
+                end
             else
-                n_offsets = (xl_found(:,7)-xl_found(:,6))/xl_found(:,8);
-                n_offsets = sum(n_offsets(:,1))+(size(n_offsets,1));
-                n_traces_away = check_xl*n_offsets;
-                n_bytes_away = n_traces_away*(trc_length+trc_head);
-                expand_keys(i_key,3) = xl_found(ind,3)+n_bytes_away;
-                expand_keys(i_key,4) = n_offsets;
+                % no skey found            
             end
         else
-            % no skey found
-            
-        end
-    else
-        % no peky found
+            % no pkey found
+        end    
     end
-    
-end
-
-
 end
 %     il_rows = seismic.trace_ilxl_bytes(:,1) == keys(:,1);    
 % 

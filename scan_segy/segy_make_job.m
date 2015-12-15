@@ -1,4 +1,4 @@
-function segy_make_job(filepath,filename_string,il_byte,xl_byte,...
+function job_meta_path = segy_make_job(filepath,filename_string,il_byte,xl_byte,...
     offset_byte,parallel,anggath,output_dir)
 %% ------------------ Disclaimer  ------------------
 % 
@@ -24,15 +24,21 @@ function segy_make_job(filepath,filename_string,il_byte,xl_byte,...
 %% ------------------ FUNCTION DEFINITION ---------------------------------
 % segy_make_job: function to scan SEGY file to gain geometry and
 % sample information used by other functions.
+
+% File Name Convention:
+% Angle Stacks: startangle-endangle_name_block1.sgy where 1 is the volume number and would be incremented if there are multiple segy files per volume, for angles <10, use format 01,02,03 etc,e.g. 02_05 not 2_5.
+% Gather: gather_name_block1.sgy where 1 is the volume number and would be incremented if there are multiple segy files per volume
+% File names shouldn't have substring 'segy' since its an identifier in the program 
+%
 %   Arguments:
 %       filepath =          path of directory containing input angle stacks only as cell array, {'/path/'}
 %       filename_string =   name of search-string in SEGY file name to scan
 %       il_byte  =          inline number byte location (189 for SEGY Rev1 format)
 %       xl_byte  =          crossline number byte location (193 for SEGY Rev1 format)
-%       output_dir =        directory in which all DIGI outputs should be saved.
 %       offset_byte =       Offset byte location (37 for SEGY Rev1 format)
 %       parallel =          1 if you want to run in parallel O if you want to run in a single machine
 %       anggath =           1 if angle gathers
+%       output_dir =        directory in which all DIGI outputs should be saved.
 %   
 %   Outputs:
 %       .mat file = metadata including sample rate, n_samples etc.
@@ -40,6 +46,8 @@ function segy_make_job(filepath,filename_string,il_byte,xl_byte,...
 %
 %   Writes to Disk:
 %       job meta files: give description and paths
+
+% Note: Search for the string 'gather' in the file name.
 
 %%
 %-------------------PROCESSING FUNCTION ARGUMENTS--------------------------
@@ -81,7 +89,7 @@ if parallel == 1                                                    % For runnin
         filenames = horzcat(filenames,' ',files_in.names{i_file});  % Create a single string of all filtered filenames
     end
     filepath = files_in.path{1};
-    [result, status] = perl('/apps/gsc/matlab-library/development/maps/extra/perl_matlab_par_for.pl','/apps/gsc/matlab-library/development/maps/scan_segy/run_segy_make_structure.sh','/apps/matlab/v2011a',filepath,num2str(il_byte),num2str(xl_byte),num2str(offset_byte),num2str(anggath),filenames);
+    [result, status] = perl('/apps/gsc/matlab-library/development/maps/extra/perl_matlab_par_for.pl','/apps/gsc/matlab-library/development/maps/scan_segy/run_segy_make_structure.sh','/apps/matlab/v2013a',filepath,num2str(il_byte),num2str(xl_byte),num2str(offset_byte),num2str(anggath),filenames);
     
 else                                                                % For running in single machine
     for i_file = 1:1:nfiles
@@ -105,6 +113,7 @@ end
 %-----------------------WRITE FILE NAMES IN JOB_META FILE---------------
 %job_meta.non_live_traces = non_live_traces;
 % Save meta information about files scanned to .mat file
+job_meta.irreg_gath = anggath;
 for i_file = 1:1:size(files_in.names,2)                                                             % Scan through the filtered files sequentially. Number of files known from size of structure
     if ~isempty(strfind(files_in.names{i_file},'segy'))                                             % Check whether file name has segy in it
 %        if is_gather == 0
@@ -155,7 +164,7 @@ end
 job_meta.volumes = unique(job_meta.volumes)';       % Removes duplicate entries. Also helps if the function is run multiple times to filter out a .mat_orig_lite file with same file name
 job_meta.nvols = size(job_meta.volumes,1);          % Finds and enters the total number of Volumes
 %%
-%----READ THE SEISMIC HEADER INFORMATION FROM MAT_ORIG_LITE FILES----------
+%----READ THE SEISMIC HEADER INFORMATION FROM  FILES----------
 
 for i_vol = 1:1:job_meta.nvols                      % Loop run for all Volumes sequentially
     if is_gather == 1                               % If this is a gather file do nothing since there shouldnt be multiple gathers in one block
@@ -169,7 +178,7 @@ for i_vol = 1:1:job_meta.nvols                      % Loop run for all Volumes s
     
     %---loop round all the mat_lite files to do with this volume-------
     for il = 1:nfiles                                                                               % nfiles is no. of files retuned from scanning directory
-        if strfind(files_in.names{il},if_string)                                                    % If a segy file was found this must have been initialized to 'mat_orig_lite' else will be null?
+        if strfind(files_in.names{il},if_string)                                                    % If a segy file was found this must have been initialized to '' else will be null?
             seismic = segy_read_binary(strcat(files_in.path{il},files_in.names{il}));               % Read seismic data related information from <file name. mat_orig_liet file> into a structure
             if ii == 1
                 vol_index{i_vol} = seismic.trace_ilxl_bytes;
@@ -294,31 +303,43 @@ if is_gather == 0
         start_idx = 1;
         blocktr = size(skey_vals_unif,1);
         row_i = 0;
-        while start_idx < blocktr
-            cdp_1 = skey_vals_unif(start_idx);
-            if start_idx < blocktr-1
-                cdp_2 = skey_vals_unif(start_idx+1);
-            end
-            if (cdp_2 - cdp_1) == skey_inc_mode
-                row_i = row_i+1;
-            else
-                compress_ilxl_bytes(count,1) = pkey_vals_unif(i_pkey,1);
-                compress_ilxl_bytes(count,2) = skey_vals_unif(start_idx-row_i,1);
-                compress_ilxl_bytes(count,3) = 0; % byte locations later
-                
-                if cdp_2 == cdp_1
-                    compress_ilxl_bytes(count,4) = skey_vals_unif(start_idx+1,1);
-                else
-                    compress_ilxl_bytes(count,4) = skey_vals_unif(start_idx,1);
+        if blocktr > 2
+            while start_idx < blocktr
+                cdp_1 = skey_vals_unif(start_idx);
+                if start_idx < blocktr-1
+                    cdp_2 = skey_vals_unif(start_idx+1);
                 end
-                
-                xl_inc = skey_vals_unif(start_idx-row_i+1,1)-skey_vals_unif(start_idx-row_i,1);
-                compress_ilxl_bytes(count,5) = xl_inc;
-                
-                row_i = 0;
-                count = count + 1;
+                if (cdp_2 - cdp_1) == skey_inc_mode
+                    row_i = row_i+1;
+                else
+                    compress_ilxl_bytes(count,1) = pkey_vals_unif(i_pkey,1);
+                    compress_ilxl_bytes(count,2) = skey_vals_unif(start_idx-row_i,1);
+                    compress_ilxl_bytes(count,3) = 0; % byte locations later
+                    
+                    if cdp_2 == cdp_1
+                        compress_ilxl_bytes(count,4) = skey_vals_unif(start_idx+1,1);
+                    else
+                        compress_ilxl_bytes(count,4) = skey_vals_unif(start_idx,1);
+                    end
+                    
+                    xl_inc = skey_vals_unif(start_idx-row_i+1,1)-skey_vals_unif(start_idx-row_i,1);
+                    compress_ilxl_bytes(count,5) = xl_inc;
+                    
+                    row_i = 0;
+                    count = count + 1;
+                end
+                start_idx = start_idx + 1;
             end
-            start_idx = start_idx + 1;
+        else
+            compress_ilxl_bytes(count,1) = pkey_vals_unif(i_pkey,1);
+            compress_ilxl_bytes(count,2) = skey_vals_unif(start_idx-row_i,1);
+            compress_ilxl_bytes(count,3) = 0; % byte locations later
+            compress_ilxl_bytes(count,4) = skey_vals_unif(start_idx+1,1);
+            xl_inc = skey_vals_unif(start_idx-row_i+1,1)-skey_vals_unif(start_idx-row_i,1);
+            compress_ilxl_bytes(count,5) = xl_inc;
+            row_i = 0;
+            count = count + 1;
+            start_idx = start_idx + 1;   
         end
     end
     
@@ -404,9 +425,8 @@ if is_gather == 0
             end
         end
         
-        for f_key = 1:1:size(byte_loc2,1)
-            %loop and write out all the file mat_lite files
-            
+        for f_key = 1:1:size(byte_loc2,1) % this might not be looping through all required files? is this size on the wrong thing! meaning 437 is correct.
+            %loop and write out all the file mat_lite files            
             % need to index to the seismic file name correctly  ##########
             % and cannot get the fopen to work, works on command line though
             seismic = segy_read_binary(strcat(job_meta.paths{1},job_meta.files{i_vol}));
@@ -426,8 +446,9 @@ if is_gather == 0
 end
 % do we need to do any of this for single volumes!
 % ##################################################################
-if is_gather == 0
-    job_meta.files = regexprep(job_meta.files,'mat_orig_lite','mat_lite')';
+ if is_gather == 0
+       job_meta.files = job_meta.files'; 
+%     job_meta.files = regexprep(job_meta.files,'mat_orig_lite','mat_lite')';
 end
 %job_meta.files = reshape(job_meta.files,[],job_meta.nvols);
 job_meta.s_rate = seismic.s_rate;

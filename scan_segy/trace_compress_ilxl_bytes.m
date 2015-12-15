@@ -35,7 +35,6 @@ function compress_ilxl_bytes  = trace_compress_ilxl_bytes(trace_ilxl_bytes,block
 %
 %   Writes to Disk:
 %       nothing
-
 pkey_loc = 1; % column numbers needs to be implemented
 skey_loc = 2;
 byte_loc = 3;

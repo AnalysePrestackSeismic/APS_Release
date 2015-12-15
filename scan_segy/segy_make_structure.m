@@ -199,6 +199,7 @@ if scan_exist1 == 0 && scan_exist2 == 0                         %  If no previou
             else
                 compress_ilxl_bytes = gather_compress_ilxl_bytes_offset(trace_ilxl_bytes,blocktr);
             end
+            % compress_ilxl_bytes(1:(end-1),9) = (compress_ilxl_bytes(2:end,3)-compress_ilxl_bytes(1:(end-1),3)) ./  ( (((compress_ilxl_bytes(1:(end-1),7)- compress_ilxl_bytes(1:(end-1),6))./compress_ilxl_bytes(1:(end-1),8))+1) .*((seismic.n_samples*4)+240));
         else
             is_gather = 0;
             if ii == 1

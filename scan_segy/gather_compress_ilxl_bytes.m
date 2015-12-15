@@ -1,23 +1,23 @@
 function compress_ilxl_bytes = gather_compress_ilxl_bytes(trace_ilxl_bytes,blocktr)
 %% ------------------ Disclaimer  ------------------
-% 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) makes no representation or warranty, express or implied, in 
+%
+% BG Group plc or any of its respective subsidiaries, affiliates and
+% associated companies (or by any of their respective officers, employees
+% or agents) makes no representation or warranty, express or implied, in
 % respect to the quality, accuracy or usefulness of this repository. The code
-% is this repository is supplied with the explicit understanding and 
-% agreement of recipient that any action taken or expenditure made by 
-% recipient based on its examination, evaluation, interpretation or use is 
+% is this repository is supplied with the explicit understanding and
+% agreement of recipient that any action taken or expenditure made by
+% recipient based on its examination, evaluation, interpretation or use is
 % at its own risk and responsibility.
-% 
-% No representation or warranty, express or implied, is or will be made in 
-% relation to the accuracy or completeness of the information in this 
-% repository and no responsibility or liability is or will be accepted by 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
+%
+% No representation or warranty, express or implied, is or will be made in
+% relation to the accuracy or completeness of the information in this
+% repository and no responsibility or liability is or will be accepted by
+% BG Group plc or any of its respective subsidiaries, affiliates and
+% associated companies (or by any of their respective officers, employees
 % or agents) in relation to it.
 
-%% ------------------ License  ------------------ 
+%% ------------------ License  ------------------
 % GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 
 %% github
@@ -25,12 +25,12 @@ function compress_ilxl_bytes = gather_compress_ilxl_bytes(trace_ilxl_bytes,block
 
 %% ------------------ FUNCTION DEFINITION ---------------------------------
 % gather_compress_ilxl_bytes: function to compress scanned SEGY trace
-% headers by finding repeating patterns. Only for pre-stack datasets that 
+% headers by finding repeating patterns. Only for pre-stack datasets that
 % are not angle gathers.
 %   Arguments:
 %       trace_ilxl_bytes = scan of trace headers created by segy_make_structure
-%       blocktr = number of input traces  
-%   
+%       blocktr = number of input traces
+%
 %   Outputs:
 %       compress_ilxl_bytes = compressed version of trace_ilxl_bytes
 %
@@ -48,7 +48,7 @@ count = 1;
 row_i = 1;
 pkey_prev = -995837;
 skey_prev = -9999437;
-
+tkey_inc_prev = 938472634;
 % this first compresses the offset header, but assumes uniform increments
 % between offsets/angles
 if blocktr > 1
@@ -60,28 +60,49 @@ if blocktr > 1
         tkey_inc = trace_ilxl_bytes(row_i,5);
         
         %if pkey == 2045 && skey == 6729 && tkey == 30
-        %   fprintf('got there\n'); 
+        %   fprintf('got there\n');
         %end
         if pkey == pkey_prev % same inline
             if tkey_inc == tkey_inc_prev
+                if skey ~= skey_prev    %new
+                    count = count + 1;  %new
+                    compress_offset_bytes(count,:) = [ pkey skey tbyte tkey tkey 1];  %new
+                end  %new
                 tkey_inc_prev = tkey_inc;
                 skey_prev = skey;
             elseif skey == skey_prev
-                if tkey_inc > 0 
+                if tkey_inc > 0
                     compress_offset_bytes(count,5:6) = [tkey tkey_inc_prev];
                     count = count + 1;
                     compress_offset_bytes(count,:) = [ pkey skey tbyte (tkey+tkey_inc) (tkey+tkey_inc) tkey_inc];
                     %trace_ilxl_bytes(( trace_ilxl_bytes(:,2) == 6729),:)
-                else 
+                else
                     compress_offset_bytes(count,5:6) = [tkey tkey_inc_prev];
                     count = count + 1;
                 end
                 tkey_inc_prev = tkey_inc;
                 skey_prev = skey;
             else
-                compress_offset_bytes(count,:) = [ pkey skey tbyte tkey tkey 1];
+                % this used to work, but fails if the first trace of a
+                % block is a single last trace of a gather, so added an if
+                % to test for neagtive diff on the tkey
+                %                 compress_offset_bytes(count,:) = [ pkey skey tbyte tkey tkey 1];
+                %                 tkey_inc_prev = tkey_inc;
+                %                 skey_prev = skey;
+                
+                if row_i == (start_idx+1)
+                    count = count + 1;
+                    compress_offset_bytes(count,:) = [ pkey skey tbyte tkey tkey 1];
+%                 elseif tkey_inc_prev >= 0 %new
+%                     count = count + 1;  % new
+%                     compress_offset_bytes(count,:) = [ pkey skey tbyte tkey tkey 1]; %new
+                else
+                    compress_offset_bytes(count,:) = [ pkey skey tbyte tkey tkey 1];
+                end
                 tkey_inc_prev = tkey_inc;
                 skey_prev = skey;
+                
+                
             end
             
         else % pkey ~= pkey_prev
@@ -180,5 +201,5 @@ else % for blocktr = 1
     count = count + 1;
     compress_ilxl_bytes(count,:) = [ trace_ilxl_bytes(row_i,pkey_loc) trace_ilxl_bytes(row_i,skey_loc) trace_ilxl_bytes(row_i,byte_loc) trace_ilxl_bytes(row_i,skey_loc) 1 trace_ilxl_bytes(row_i,4) trace_ilxl_bytes(row_i,4) 1];
 end
-    
+
 end

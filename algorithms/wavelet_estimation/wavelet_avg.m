@@ -1,42 +1,19 @@
 function [] = wavelet_avg(job_meta_path)
-%% ------------------ Disclaimer  ------------------
-% 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) makes no representation or warranty, express or implied, in 
-% respect to the quality, accuracy or usefulness of this repository. The code
-% is this repository is supplied with the explicit understanding and 
-% agreement of recipient that any action taken or expenditure made by 
-% recipient based on its examination, evaluation, interpretation or use is 
-% at its own risk and responsibility.
-% 
-% No representation or warranty, express or implied, is or will be made in 
-% relation to the accuracy or completeness of the information in this 
-% repository and no responsibility or liability is or will be accepted by 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) in relation to it.
-
-%% ------------------ License  ------------------ 
-% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
-%% github
-% https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-% wavelet_avg: function to create wavelet set for use in DIGI. Currently
+% -------------------------------------------------------------------------
+% WAVELET_AVG: function to create wavelet set for use in DIGI. Currently
 % wavelets vary with time and angle. Spatially variant wavelets not yet
-% implemented.
-%   Arguments:
-%	job_meta_path = path to .mat file created using
-%       segy_make_job function.
-%
+% implimented.
+%   Inputs:
+%       seismic_mat_path = path to .mat file created using
+%       segy_make_structure function.
+%       n_blocks = number of blocks to divide processing into.
 %   Outputs:
 %       all_wavelets_time.mat = mat file to be input into DIGI.
 %       This .mat file contains .... ??
 %       all_wavelets_freq (...), all_wavelets_time (...), max_wavelet_zgrid (...),
 %       min_wavelet_zgrid(...)
-%
-%   Writes to Disk:
-%       nothing 
+% -------------------------------------------------------------------------
+
 
 job_meta = load(job_meta_path);             % Load job meta information 
 

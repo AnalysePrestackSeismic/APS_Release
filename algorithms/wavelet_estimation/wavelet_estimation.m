@@ -1,41 +1,39 @@
 function [] = wavelet_estimation(job_meta_path,i_block,decimate,first_live_block)
 %% ------------------ Disclaimer  ------------------
-% 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) makes no representation or warranty, express or implied, in 
+%
+% BG Group plc or any of its respective subsidiaries, affiliates and
+% associated companies (or by any of their respective officers, employees
+% or agents) makes no representation or warranty, express or implied, in
 % respect to the quality, accuracy or usefulness of this repository. The code
-% is this repository is supplied with the explicit understanding and 
-% agreement of recipient that any action taken or expenditure made by 
-% recipient based on its examination, evaluation, interpretation or use is 
+% is this repository is supplied with the explicit understanding and
+% agreement of recipient that any action taken or expenditure made by
+% recipient based on its examination, evaluation, interpretation or use is
 % at its own risk and responsibility.
-% 
-% No representation or warranty, express or implied, is or will be made in 
-% relation to the accuracy or completeness of the information in this 
-% repository and no responsibility or liability is or will be accepted by 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
+%
+% No representation or warranty, express or implied, is or will be made in
+% relation to the accuracy or completeness of the information in this
+% repository and no responsibility or liability is or will be accepted by
+% BG Group plc or any of its respective subsidiaries, affiliates and
+% associated companies (or by any of their respective officers, employees
 % or agents) in relation to it.
-%% ------------------ License  ------------------ 
+%% ------------------ License  ------------------
 % GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 %% github
 % https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-% wavelet_estimation: Function to estimate wavelets for DIGI
+%% ------------------ FUNCTION DEFINITION ---------------------------------%-------------------------------------------------------------------------
+% Estimate wavelets for DIGI
 % Pick water bottom on 2/3 of max angle stack to get reliable pick
 % Use this pick to flatten all other angle stacks
 % Estimate wavelets from flattened angle stacks
-%   Arguments:
+% Input:
 %       job_meta_path:      Path to job meta file as a string
-%       i_block:            The block on which the program will be run
+%       i_block:            The block (segment) on which the program will be run
 %       decimate:           decimation factor
 %       first_live_block:   The block number of the first live block
+% Output:
+%Saves to Disk: Wavelet file for ith block in binary format
 %
-%   Outputs:
-%	Saves to Disk: Wavelet file for ith block in binary format
-%   Writes to Disk:
-%       nothing
-
+%-------------------------------------------------------------------------
 plot_on = 0;
 decimate = str2double(decimate);
 % Load job meta information
@@ -61,7 +59,8 @@ wav_directory = strcat(job_meta.output_dir,'wavelets/');
 % Read traces for 2/3 max angle stack
 %vol_index_wb = ceil(job_meta.nvols*0.6667);
 if job_meta.is_gather == 0
-    pick_wb_ind = ceil(job_meta.nvols*0.6667);
+    %pick_wb_ind = ceil(job_meta.nvols*0.6667);
+    pick_wb_ind = floor(job_meta.nvols*0.6667);
     vol_index_wb = 1;
     [~, traces{vol_index_wb}, ilxl_read{vol_index_wb}] = node_segy_read(job_meta_path,num2str(pick_wb_ind),i_block);
     % check to make sure it read something if not exit
@@ -80,69 +79,81 @@ else
     if isempty(gathers) == 1 &&  isempty(ilxl_read) == 1 && isempty(offset_read) == 1
         return
     end
-    %     juststack = 1;
-    %     if juststack == 1
-     traces{vol_index_wb} = zeros(size(gathers,1),size(gathers,2)/size(offset,2)); 
-    for stki  = 1:size(offset,2)
-        traces{vol_index_wb} = traces{vol_index_wb} + gathers(:,offset_read == offset(stki));
+    
+    % do not need to choose the gather trace to pick wb on if we are using
+    % a supplied wb
+    if isfield(job_meta, 'wb_path')
+        pick_wb_ind = floor(length(offset)/2);
+        traces{vol_index_wb} = gathers(:,offset_read == offset(pick_wb_ind));
+    else
+        
+        %     juststack = 1;
+        %     if juststack == 1
+        traces{vol_index_wb} = zeros(size(gathers,1),size(gathers,2)/size(offset,2));
+        % Stack all the angles to make a full stack with given angle range
+        for stki  = 1:size(offset,2)
+            traces{vol_index_wb} = traces{vol_index_wb} + gathers(:,offset_read == offset(stki)); % access the right angle from the gather volume
+        end
+        % should reshape and sum instead of this terrible loop
+        %     else
+        % this part of the code could be used to make a sub stack around
+        % the wb pick time that is the interpolate to find the peak for an
+        % accurate wb picker
+        
+        %read the middle 5 gathers in the input data to find the middle tkey(angle/offset) value of the water bottom
+        %traces{vol_index_wb} = gathers(:,(floor(size(gathers,2)/2)-(length(offset)*2)):(floor(size(gathers,2)/2)+(length(offset)*2)));
+        %traces{vol_index_wb} = gathers(:,(floor(size(gathers,2)/2)-(length(offset)*2.5)+2):(floor(size(gathers,2)/2)+(length(offset)*2.5)));
+        %tmpoffread = offset_read((floor(size(gathers,2)/2)-(length(offset)*2.5)+2):(floor(size(gathers,2)/2)+(length(offset)*2.5)));
+        traces{vol_index_wb} = gathers(:,floor((size(gathers,2)/2)-(length(offset)*2.5)+2):floor((size(gathers,2)/2)+(length(offset)*2.5)));
+        tmpoffread = offset_read(floor((size(gathers,2)/2)-(length(offset)*2.5)+2):floor((size(gathers,2)/2)+(length(offset)*2.5)));
+        %pick the water bottom
+        [wb_idxcj] = water_bottom_picker(traces{vol_index_wb}(:,:),0);
+        %filter the water bottom pick to make a difference in WB time for
+        %traces that are not picking the wb
+        filtw = [1 2 3 2 1]/9;
+        wb_idxcjfilt = conv(wb_idxcj,filtw,'same');
+        % now make a blank array the size of the wb index array
+        wb_idxcj2 = zeros(1,size(wb_idxcj,2));
+        %now find the difference between the values of the filtered and
+        %unfiltered water bottom indexes, if there is a difference then it is
+        %likely to not be the water bottom as it should be mostly flat on the
+        %gathers
+        wb_idx_diff_ck = abs((wb_idxcj./wb_idxcjfilt)-1);
+        wb_idxcj2(wb_idx_diff_ck < 0.009) =  wb_idxcj(wb_idx_diff_ck < 0.009);
+        
+        %now work out the index locations of the water bottom
+        wb_idx_index = 1:1:size(wb_idxcj,2);
+        %apply a logical index to the index array to give the index of where the wb is picked and less then 10 elsewhere
+        wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))));
+        % select the angles with the wb on
+        tmpwbangs = (tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))))));
+        tmpangpickstd = ceil(std(double(tmpwbangs)));
+        tmpangpick = floor(mean(tmpwbangs));
+        %tmpangpick = floor(mean(tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1)))))));
+        % pick_wb_ind = find(offset == tmpangpick);
+        pick_wb_ind = find(offset >= tmpangpick,1,'first');
+        %tmp_first = max([min(offset) (tmpangpick - tmpangpickstd)]);
+        %tmp_last = min([max(offset) (tmpangpick + tmpangpickstd)]);
+        %         tmp_first_wbidx = find(offset == max([min(offset) (tmpangpick - tmpangpickstd)]));
+        %         tmp_last_wbidx = find(offset == min([max(offset) (tmpangpick + tmpangpickstd)]));
+        %         %ismember(offset_read,(tmpangpick - tmpangpickstd):(tmpangpick + tmpangpickstd)
+        %
+        %         traces{vol_index_wb} = zeros(size(gathers,1),size(gathers,2)/size(offset,2));
+        %         for stki  = tmp_first_wbidx:tmp_last_wbidx
+        %             traces{vol_index_wb} = traces{vol_index_wb} + gathers(:,offset_read == offset(stki));
+        %         end
+        %traces{vol_index_wb} = traces{vol_index_wb}./(tmp_last_wbidx - tmp_first_wbidx + 1);
+        
+        %     end
+        %     wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10))));
+        %     % calculate the gather index in each gather by removing the integer
+        %     % number of gathers from the index number and putting back to all being
+        %     % the same angle index in each gather ie 1-46,1-46,1-46 etc... and
+        %     % findingf the average value of all the indexes
+        %     pick_wb_ind = floor(mean(((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset) - floor((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset)))*length(offset)));
+        %     %read the offset plane from the input data gathers.
+        traces{vol_index_wb} = gathers(:,offset_read == offset(pick_wb_ind));
     end
-    % should reshape and sum instead of this terrible loop
-    %     else
-    % this part of the code could be used to make a sub stack around
-    % the wb pick time that is the interpolate to find the peak for an
-    % accurate wb picker
-    %read the middle 5 gathers in the input data to find the middle tkey(angle/offset) value of the water bottom
-    %traces{vol_index_wb} = gathers(:,(floor(size(gathers,2)/2)-(length(offset)*2)):(floor(size(gathers,2)/2)+(length(offset)*2)));
-    %traces{vol_index_wb} = gathers(:,(floor(size(gathers,2)/2)-(length(offset)*2.5)+2):(floor(size(gathers,2)/2)+(length(offset)*2.5)));
-    %tmpoffread = offset_read((floor(size(gathers,2)/2)-(length(offset)*2.5)+2):(floor(size(gathers,2)/2)+(length(offset)*2.5)));
-    traces{vol_index_wb} = gathers(:,floor((size(gathers,2)/2)-(length(offset)*2.5)+2):floor((size(gathers,2)/2)+(length(offset)*2.5)));
-    tmpoffread = offset_read(floor((size(gathers,2)/2)-(length(offset)*2.5)+2):floor((size(gathers,2)/2)+(length(offset)*2.5)));
-    %pick the water bottom
-    [wb_idxcj] = water_bottom_picker(traces{vol_index_wb}(:,:),0);
-    %filter the water bottom pick to make a difference in WB time for
-    %traces that are not picking the wb
-    filtw = [1 2 3 2 1]/9;
-    wb_idxcjfilt = conv(wb_idxcj,filtw,'same');
-    % now make a blank array the size of the wb index array
-    wb_idxcj2 = zeros(1,size(wb_idxcj,2));
-    %now find the difference between the values of the filtered and
-    %unfiltered water bottom indexes, if there is a difference then it is
-    %likely to not be the water bottom as it should be mostly flat on the
-    %gathers
-    wb_idx_diff_ck = abs((wb_idxcj./wb_idxcjfilt)-1);
-    wb_idxcj2(wb_idx_diff_ck < 0.009) =  wb_idxcj(wb_idx_diff_ck < 0.009);
-    
-    %now work out the index locations of the water bottom
-    wb_idx_index = 1:1:size(wb_idxcj,2);
-    %apply a logical index to the index array to give the index of where the wb is picked and less then 10 elsewhere
-    wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))));
-    % select the angles with the wb on
-    tmpwbangs = (tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1))))));
-    tmpangpickstd = ceil(std(double(tmpwbangs)));
-    tmpangpick = floor(mean(tmpwbangs));
-    %tmpangpick = floor(mean(tmpoffread(wb_idx_index(ismember(wb_idxcj2,floor((min(wb_idxcj2((wb_idxcj2 > 10)))*0.9)):1:ceil((min(wb_idxcj2((wb_idxcj2 > 10)))*1.1)))))));
-    pick_wb_ind = find(offset == tmpangpick);
-    %tmp_first = max([min(offset) (tmpangpick - tmpangpickstd)]);
-    %tmp_last = min([max(offset) (tmpangpick + tmpangpickstd)]);
-    %         tmp_first_wbidx = find(offset == max([min(offset) (tmpangpick - tmpangpickstd)]));
-    %         tmp_last_wbidx = find(offset == min([max(offset) (tmpangpick + tmpangpickstd)]));
-    %         %ismember(offset_read,(tmpangpick - tmpangpickstd):(tmpangpick + tmpangpickstd)
-    %
-    %         traces{vol_index_wb} = zeros(size(gathers,1),size(gathers,2)/size(offset,2));
-    %         for stki  = tmp_first_wbidx:tmp_last_wbidx
-    %             traces{vol_index_wb} = traces{vol_index_wb} + gathers(:,offset_read == offset(stki));
-    %         end
-    %traces{vol_index_wb} = traces{vol_index_wb}./(tmp_last_wbidx - tmp_first_wbidx + 1);
-    
-    %     end
-    %     wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10))));
-    %     % calculate the gather index in each gather by removing the integer
-    %     % number of gathers from the index number and putting back to all being
-    %     % the same angle index in each gather ie 1-46,1-46,1-46 etc... and
-    %     % findingf the average value of all the indexes
-    %     pick_wb_ind = floor(mean(((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset) - floor((wb_idx_index(wb_idxcj2 == min(wb_idxcj2((wb_idxcj2 > 10)))))/length(offset)))*length(offset)));
-    %     %read the offset plane from the input data gathers.
-    traces{vol_index_wb} = gathers(:,offset_read == offset(pick_wb_ind));
 end
 
 %
@@ -161,7 +172,11 @@ if isfield(job_meta, 'wb_path')
     % col 1 inline
     % col 2 xline
     % col 3 twt
-    [~,locations] = ismember(ilxl_read{1}(1:end,:),wb_idx_in(:,1:2),'rows');
+    if job_meta.is_gather == 1
+        [~,locations] = ismember(ilxl_read(1:length(offset):end,:),wb_idx_in(:,1:2),'rows');
+    else
+        [~,locations] = ismember(ilxl_read{1}(1:end,:),wb_idx_in(:,1:2),'rows');
+    end
     %wb_idx = zeros(size(traces{vol_index_wb},2),1);
     zero_loc = locations ~= 0;
     %wb_idx(zero_loc) = wb_idx_in(locations(zero_loc),3);
@@ -176,9 +191,11 @@ if isfield(job_meta, 'wb_path')
     %wb_idx2 = wb_idx(wb_idx(:,1) >= min_il & wb_idx(:,1) <= max_il & wb_idx(:,2) >= min_xl & wb_idx(:,2) <= max_xl,:);
     %    wb_idx = wb_idx(wb_idx(:,1) >= min_il & wb_idx(:,1) <= (max_il+1) & wb_idx(:,2) >= min_xl & wb_idx(:,2) <= (max_xl+1),:);
     %   wb_idx(:,3) = wb_idx(:,3)./(job_meta.s_rate/1000);
-    wb_idx = (wb_idx./(job_meta.s_rate/1000))';
+    wb_idx = (wb_idx./(job_meta.s_rate/1000))'; % convert the water bottom into number of samples by dividing by sampling rate
     %padding = 10;
     wb_idx = round(wb_idx-padding);
+    wb_idx(isnan(wb_idx)) = 1;
+    wb_idx(wb_idx < 1) = 1;
     win_sub = bsxfun(@plus,wb_idx,(0:job_meta.n_samples{vol_index_wb}-max(wb_idx))');
     
     win_ind = bsxfun(@plus,win_sub,(0:job_meta.n_samples{vol_index_wb}:...
@@ -335,7 +352,8 @@ if n_traces > 2
     fid_wav = fopen(strcat(wav_directory,'fft_wavelets_block_',i_block,'.bin'),'r');
     
     % Calculate
-    stdev = round(sqrt(median(variance))); % might like to think about calculating this properly based on live samples
+%     stdev = round(sqrt(median(variance))); % might like to think about calculating this properly based on live samples
+    stdev = single(sqrt(median(variance))); % might like to think about calculating this properly based on live samples
     w = fread(fid_wav,'float32');
     fclose(fid_wav);
     w(3) = stdev;
