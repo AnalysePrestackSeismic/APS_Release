@@ -1,43 +1,4 @@
 function [ ] = meta_data_2d_smo_xy( job_meta_path )
-%% ------------------ Disclaimer  ------------------
-% 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) makes no representation or warranty, express or implied, in 
-% respect to the quality, accuracy or usefulness of this repository. The code
-% is this repository is supplied with the explicit understanding and 
-% agreement of recipient that any action taken or expenditure made by 
-% recipient based on its examination, evaluation, interpretation or use is 
-% at its own risk and responsibility.
-% 
-% No representation or warranty, express or implied, is or will be made in 
-% relation to the accuracy or completeness of the information in this 
-% repository and no responsibility or liability is or will be accepted by 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) in relation to it.
-%% ------------------ License  ------------------ 
-% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
-%% github
-% https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-% water_bottom_picker: function to pick water bottom (first event) of 
-% seismic dataset.
-%   Arguments:
-%	job_meta_path = path to .mat file created using
-%       segy_make_job function.
-%   
-%   Outputs:
-%       adds following variables to job_meta file:
-%	job_meta.stdev_smo = smoothing of standard deviation calculated in
-%	wavelet_estimation function. Used by int_grad_inv_proj as scaling in
-% 	the inversion.
-%	job_meta.live_offset_avg = used to provide a consistent offset to
-%	water_bottom_picker function
-%
-%   Writes to Disk:
-%       nothing 
-
 %ILXL_GRID Summary of this function goes here
 % Input:
 % Output:
@@ -79,6 +40,14 @@ while lpi <= loopfin
 end
 %%
 %Plotting
+% check for NaNs
+log_nan = isnan(ilxl_lookup(:,:,2));
+if sum(sum(log_nan)) > 0
+   ilxl_lookup_lin = squeeze(ilxl_lookup(:,:,2)); 
+   ilxl_lookup_lin = ilxl_lookup_lin(:); 
+   ilxl_lookup_lin(log_nan) = 0;
+   ilxl_lookup(:,:,2) = reshape(ilxl_lookup_lin,xlslen,ilslen);   
+end
 
 figure(1); imagesc(ilxl_lookup(:,:,2)); title('input variance');%caxis([500 1000]);                     % Plot Variance
 figure(11); imagesc(ilxl_lookup(:,:,3)); title('input water bottom depth'); %caxis([500 1000]);         % Plot Average Water Bottom Z
