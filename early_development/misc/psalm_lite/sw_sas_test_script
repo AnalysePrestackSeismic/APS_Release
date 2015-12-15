@@ -1,0 +1,23 @@
+function [] = sas_test_script(seismic_mat_path,i_block,n_blocks,window_length,binary_slice_path,block_path,wb_path,output_dir)
+
+all_windows = [1, 10, 50, 200];
+output_directory{1,1} = '/data/Global/dtect/SRW_test_dataset/SEGY/matlab/full_run/sas_results/window_1/';
+output_directory{2,1} = '/data/Global/dtect/SRW_test_dataset/SEGY/matlab/full_run/sas_results/window_10/';
+output_directory{3,1} = '/data/Global/dtect/SRW_test_dataset/SEGY/matlab/full_run/sas_results/window_50/';
+output_directory{4,1} = '/data/Global/dtect/SRW_test_dataset/SEGY/matlab/full_run/sas_results/window_200/';
+
+for test = 1:4
+    window_length = all_windows(test);
+    output_dir = output_directory{test,1};
+    
+end
+    
+    
+    
+    for i_block = 1:n_blocks;
+        
+        seismic_anomaly_spotter_lite_sw(seismic_mat_path,i_block,n_blocks,window_length,binary_slice_path,output_dir);
+        
+        
+    end
+end

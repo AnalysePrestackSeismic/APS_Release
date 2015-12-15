@@ -1,0 +1,1 @@
+node_slurm_submit_lite('trim_calculation',1000000,'/data/NOR/segy/hegg_fwi_test_2012/gathers/vti_full_area_slant.mat_lite','segy','/data/NOR/segy/hegg_fwi_test_2012/gathers/','10','5','25')

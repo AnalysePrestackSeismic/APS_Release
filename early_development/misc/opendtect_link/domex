@@ -1,0 +1,7 @@
+#!/bin/csh
+set MATLABDIR=/apps/matlab/curver
+set oddir=/apps/dtect_dev/4_6_0_o/4.6.0
+set incdir=$oddir/include
+set sodir=$oddir/bin/lux64/Release
+
+$MATLABDIR/bin/mex -D__lux64__ -I$incdir/Basic -I$incdir/Algo -I$incdir/General -I$incdir/Seis -I$incdir/AttributeEngine -L$sodir -lBasic -lAlgo -lGeneral -lSeis -lAttributeEngine $*

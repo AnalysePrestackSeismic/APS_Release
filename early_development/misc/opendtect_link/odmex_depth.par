@@ -1,0 +1,24 @@
+-- Parameter file for OpendTect MEX files
+
+-- Specify survey and data root. If these are missing, last selected survey and
+-- dataroot from OpendTect will be used.
+Survey: 2014_TZA_block_34_mafia
+Data Root: /data/TZA/dtect/
+
+-- Input seismic data. Two option, with ID or name.
+-- Input Seismics.Name: DIGI_INT_LP50hz
+Input Seismics.ID: 100010.16
+
+-- Output seismic data. Must be a name.
+Output Seismics.Name: FromMatlab
+
+-- Data range. When empty. the survey ranges will be used.
+First In-line: 8000
+Last In-line: 8000
+Step In-line: 1
+Z range: 2`4
+-- First Cross-line: 3458
+-- Last Cross-line: 9230
+-- Step Cross-line: 1
+-- In-line range: 7000`7000`1
+-- Cross-line range: 3458`3458`1

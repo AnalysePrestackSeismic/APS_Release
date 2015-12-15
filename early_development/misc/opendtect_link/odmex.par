@@ -1,0 +1,26 @@
+-- Parameter file for OpendTect MEX files
+
+-- Specify survey and data root. If these are missing, last selected survey and
+-- dataroot from OpendTect will be used.
+Survey: bg_site_tza_1BD
+Data Root: /data/TZA/dtect/
+
+-- Input seismic data. Two option, with ID or name.
+-- Input Seismics.Name: DIGI_INT_LP50hz
+Input Seismics.ID: 100010.2
+
+-- Output seismic data. Must be a name.
+Output Seismics.Name: x_dip_component
+
+-- Data range. When empty. the survey ranges will be used.
+First In-line: 7020  
+Last In-line: 7050
+Step In-line: 1
+First Cross-line: 4127
+Last Cross-line: 4767
+Step Cross-line: 1
+Z range: 0`4.4
+-- In-line range: 6723`7363`1
+-- Cross-line range: 4127`4767`1
+
+

@@ -1,0 +1,368 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>anomalous_body_connector</title><meta name="generator" content="MATLAB 7.12"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2013-02-20"><meta name="DC.source" content="anomalous_body_connector.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><pre class="codeinput"><span class="keyword">function</span> anomalous_body_connector(block_mat_all,block_mat,process_files_mat,anomalous_threshold,connectivity,join_block_id)
+<span class="comment">% block_mat - information about the traces to process in this block</span>
+<span class="comment">% process_files_mat - structures for the files to be read in</span>
+<span class="comment">% anomalous_threshold - between 0 and 1</span>
+<span class="comment">% connectivity - 6, 18 or 26</span>
+<span class="comment">% join_block_id - the id of the block that will combine results, set to 0</span>
+<span class="comment">% if no</span>
+
+<span class="comment">% make the processing positions for the function</span>
+process_files = load(process_files_mat,<span class="string">'-mat'</span>);
+
+<span class="comment">% Read - which should be slice order from the anomaly calculator function</span>
+<span class="comment">% [anom_traces_logic process_positions] = node_segy_read_traces(block_mat,process_files_mat,1);</span>
+[anom_traces_logic process_positions] = node_segy_read_traces(block_mat_all,block_mat,process_files_mat, 1); <span class="comment">% (block_mat_all,block_mat,process_files_mat,index_file_read)</span>
+
+<span class="keyword">if</span> process_positions.ilxl_aperture ~= 0
+    <span class="keyword">return</span>;
+<span class="keyword">else</span>
+    n_pos = (2*process_positions.ilxl_aperture+1)^2;
+<span class="keyword">end</span>
+
+<span class="comment">% Position information</span>
+nil = length(unique(process_positions.ilxl_grid(:,1)))*sqrt(n_pos);
+nxl = length(unique(process_positions.ilxl_grid(:,2)))*sqrt(n_pos);
+nz = length(process_positions.z_pos);
+
+anom_traces_logic = anom_traces_logic &gt;= anomalous_threshold; <span class="comment">% create a logical array based on user threshold</span>
+
+<span class="comment">% Make input data in a 3D arrray for connectivity tool</span>
+I = zeros(nz, <span class="keyword">...</span>
+    nxl, <span class="keyword">...</span>
+    nil);
+
+<span class="keyword">for</span> ii = 1:1:nz
+    I(ii,:,:) = reshape(anom_traces_logic(ii,:),nxl,nil);
+<span class="keyword">end</span>
+
+<span class="comment">% run connectivity and stats algorithm</span>
+fprintf(<span class="string">'-- Block %d --\n'</span>,process_positions.block_id);
+CC = bwconncomp(I,connectivity);
+STATS = regionprops(CC,<span class="string">'Area'</span>,<span class="string">'BoundingBox'</span>,<span class="string">'Centroid'</span>,<span class="string">'PixelList'</span>,<span class="string">'PixelIdxList'</span>);
+
+<span class="comment">% make into column vector</span>
+I = I(:);
+<span class="comment">% preallocate other stats of interest</span>
+I_vol = zeros(length(I),1);
+I_id = zeros(length(I),1);
+I_depth = zeros(length(I),1);
+I_azimuth_axis = zeros(length(I),1);
+I_azimuth_vals = zeros(length(I),1);
+
+fprintf(<span class="string">'-- Finished calculating connectivity for %d bodies --\n'</span>,CC.NumObjects);
+fprintf(<span class="string">'-- Calculating volume, depth and azimuth --\n'</span>);
+<span class="keyword">for</span> ii = 1:1:CC.NumObjects
+    I_vol(CC.PixelIdxList{ii}) = STATS(ii).Area; <span class="comment">% volume</span>
+
+    <span class="comment">% generate random numbers for ids in each block</span>
+    a = 1;
+    b = 500;
+    r = a + (b-a).*rand(1);
+    I_id(CC.PixelIdxList{ii}) = ii*r;
+
+    <span class="comment">% anomaly depth</span>
+    I_depth(CC.PixelIdxList{ii}) = STATS(ii).Centroid(2)*process_files.s_rate/1000;
+
+    <span class="comment">% Calculate the azimuth (brace yourself!)</span>
+    <span class="comment">% sort by x</span>
+        pos_sort_x = sortrows(unique(STATS(ii).PixelList,<span class="string">'rows'</span>),[3 1 2]);
+        pos_x_min = pos_sort_x(1,:);
+        pos_x_max = pos_sort_x(end,:);
+        <span class="comment">% sort by y</span>
+        pos_sort_y = sortrows(unique(STATS(ii).PixelList,<span class="string">'rows'</span>),[1 3 2]);
+        pos_y_min = pos_sort_y(1,:);
+        pos_y_max = pos_sort_y(end,:);
+
+        diff_x = (pos_x_max(3)-pos_x_min(3))^2+(pos_x_max(1)-pos_x_min(1))^2;
+        diff_y = (pos_y_max(3)-pos_y_min(3))^2+(pos_y_max(1)-pos_y_min(1))^2;
+
+        <span class="keyword">if</span> diff_x &gt; diff_y
+            minpos{ii}(1,:) = pos_x_min;
+            maxpos{ii}(1,:) = pos_x_max;
+        <span class="keyword">else</span>
+            minpos{ii}(1,:) = pos_y_min;
+            maxpos{ii}(1,:) = pos_y_max;
+        <span class="keyword">end</span>
+        <span class="comment">% Calculate azimuth</span>
+        opp = maxpos{ii}(1) - minpos{ii}(1); <span class="comment">% y dimension</span>
+        adj = maxpos{ii}(3) - minpos{ii}(3); <span class="comment">% x dimension</span>
+        azimuth = atan(opp/adj);
+        <span class="keyword">if</span> isnan(azimuth)
+           azimuth = 0;
+           opp = 0;
+           adj = 0;
+        <span class="keyword">end</span>
+
+        I_azimuth_axis(CC.PixelIdxList{ii}) = abs(sin(azimuth)*opp);
+        azimuth = 180/pi()*azimuth;
+        <span class="keyword">if</span> azimuth &lt; 0;
+           azimuth = abs(azimuth)+90;
+        <span class="keyword">end</span>
+        I_azimuth_vals(CC.PixelIdxList{ii}) = azimuth;
+
+    <span class="keyword">if</span> (floor(ii/5000) == ii/5000)
+        fprintf(<span class="string">'%d%% complete \n'</span>,round((ii/CC.NumObjects)*100));
+    <span class="keyword">elseif</span> ii == CC.NumObjects
+        fprintf(<span class="string">'Completed block %d \n'</span>,process_positions.block_id);
+    <span class="keyword">end</span>
+<span class="keyword">end</span>
+
+<span class="comment">% if only 1 block save result</span>
+    <span class="keyword">if</span> process_files.n_blocks == 1
+        results_mat = strcat(process_files.path_for_blocks,<span class="keyword">...</span>
+                process_files.func_name,<span class="string">'_results_block_'</span>,<span class="keyword">...</span>
+                num2str(process_files.n_blocks),<span class="string">'.mat'</span>);
+        struct_out.results_out{1,1} = <span class="string">'body_id'</span>;
+        struct_out.results_out{2,1} = <span class="string">'body_volume'</span>;
+        struct_out.results_out{3,1} = <span class="string">'body_depth'</span>;
+        struct_out.results_out{4,1} = <span class="string">'body_azimuth'</span>;
+        struct_out.results_out{1,2} = I_id;
+        struct_out.results_out{2,2} = I_vol;
+        struct_out.results_out{3,2} = I_depth;
+        struct_out.results_out{4,2} = I_azimuth_vals;
+        struct_out.anomalous_threshold = anomalous_threshold;
+        save(results_mat,<span class="string">'-struct'</span>,<span class="string">'struct_out'</span>,<span class="string">'-v7.3'</span>);
+    <span class="keyword">else</span> <span class="comment">% multiple blocks</span>
+        I_vol = reshape(I_vol,nz,nil*nxl);
+        I_id = reshape(I_id,nz,nil*nxl);
+        I_azimuth_axis = reshape(I_azimuth_axis,nz,nil*nxl);
+        I_azimuth_vals = reshape(I_azimuth_vals,nz,nil*nxl);
+        I_depth = reshape(I_depth,nz,nil*nxl);
+
+        <span class="comment">% save results from each block as matlab .mat binaries</span>
+        temp_results_mat = strcat(process_files.path_for_blocks,<span class="string">'.temp_'</span>,<span class="keyword">...</span>
+            process_files.func_name,<span class="string">'_block_'</span>,num2str(process_positions.block_id),<span class="string">'.mat'</span>);
+        save(temp_results_mat,<span class="string">'anomalous_threshold'</span>,<span class="string">'I_vol'</span>,<span class="string">'I_id'</span>,<span class="string">'I_depth'</span>,<span class="string">'I_azimuth_axis'</span>,<span class="string">'I_azimuth_vals'</span>,<span class="string">'-v7.3'</span>);
+
+        temp_results_mat2 = strcat(process_files.path_for_blocks,<span class="string">'temp_'</span>,<span class="keyword">...</span>
+            process_files.func_name,<span class="string">'_block_'</span>,num2str(process_positions.block_id),<span class="string">'.mat'</span>);
+        system_for = sprintf(<span class="string">'mv %s %s'</span>,temp_results_mat,temp_results_mat2);
+        system(system_for);
+
+        <span class="keyword">if</span> join_block_id == process_positions.block_id; <span class="comment">% this will be the node that joins things together</span>
+            clearvars <span class="string">-except</span> <span class="string">process_files</span>
+            merge_anomalous_body_connector(process_files.func_name,process_files.path_for_blocks);
+        <span class="keyword">end</span>
+    <span class="keyword">end</span>
+<span class="keyword">end</span>
+</pre><pre class="codeoutput">Input argument "process_files_mat" is undefined.
+
+Error in ==&gt; anomalous_body_connector at 10
+process_files = load(process_files_mat,'-mat');
+</pre><p class="footer"><br>
+      Published with MATLAB&reg; 7.12<br></p></div><!--
+##### SOURCE BEGIN #####
+function anomalous_body_connector(block_mat_all,block_mat,process_files_mat,anomalous_threshold,connectivity,join_block_id)
+% block_mat - information about the traces to process in this block
+% process_files_mat - structures for the files to be read in
+% anomalous_threshold - between 0 and 1
+% connectivity - 6, 18 or 26
+% join_block_id - the id of the block that will combine results, set to 0
+% if no
+
+% make the processing positions for the function
+process_files = load(process_files_mat,'-mat');
+
+% Read - which should be slice order from the anomaly calculator function
+% [anom_traces_logic process_positions] = node_segy_read_traces(block_mat,process_files_mat,1);
+[anom_traces_logic process_positions] = node_segy_read_traces(block_mat_all,block_mat,process_files_mat, 1); % (block_mat_all,block_mat,process_files_mat,index_file_read)
+
+if process_positions.ilxl_aperture ~= 0
+    return;
+else
+    n_pos = (2*process_positions.ilxl_aperture+1)^2;
+end
+
+% Position information
+nil = length(unique(process_positions.ilxl_grid(:,1)))*sqrt(n_pos);
+nxl = length(unique(process_positions.ilxl_grid(:,2)))*sqrt(n_pos);
+nz = length(process_positions.z_pos);
+
+anom_traces_logic = anom_traces_logic >= anomalous_threshold; % create a logical array based on user threshold   
+
+% Make input data in a 3D arrray for connectivity tool
+I = zeros(nz, ...
+    nxl, ...
+    nil);
+
+for ii = 1:1:nz
+    I(ii,:,:) = reshape(anom_traces_logic(ii,:),nxl,nil);
+end
+
+% run connectivity and stats algorithm
+fprintf('REPLACE_WITH_DASH_DASH Block %d REPLACE_WITH_DASH_DASH\n',process_positions.block_id);
+CC = bwconncomp(I,connectivity);
+STATS = regionprops(CC,'Area','BoundingBox','Centroid','PixelList','PixelIdxList');
+
+% make into column vector
+I = I(:);
+% preallocate other stats of interest
+I_vol = zeros(length(I),1);
+I_id = zeros(length(I),1);
+I_depth = zeros(length(I),1);
+I_azimuth_axis = zeros(length(I),1);
+I_azimuth_vals = zeros(length(I),1);
+
+fprintf('REPLACE_WITH_DASH_DASH Finished calculating connectivity for %d bodies REPLACE_WITH_DASH_DASH\n',CC.NumObjects);
+fprintf('REPLACE_WITH_DASH_DASH Calculating volume, depth and azimuth REPLACE_WITH_DASH_DASH\n');
+for ii = 1:1:CC.NumObjects
+    I_vol(CC.PixelIdxList{ii}) = STATS(ii).Area; % volume
+    
+    % generate random numbers for ids in each block
+    a = 1;
+    b = 500;
+    r = a + (b-a).*rand(1);
+    I_id(CC.PixelIdxList{ii}) = ii*r;
+    
+    % anomaly depth
+    I_depth(CC.PixelIdxList{ii}) = STATS(ii).Centroid(2)*process_files.s_rate/1000;
+    
+    % Calculate the azimuth (brace yourself!)
+    % sort by x
+        pos_sort_x = sortrows(unique(STATS(ii).PixelList,'rows'),[3 1 2]);
+        pos_x_min = pos_sort_x(1,:);
+        pos_x_max = pos_sort_x(end,:);
+        % sort by y
+        pos_sort_y = sortrows(unique(STATS(ii).PixelList,'rows'),[1 3 2]);
+        pos_y_min = pos_sort_y(1,:);
+        pos_y_max = pos_sort_y(end,:);
+
+        diff_x = (pos_x_max(3)-pos_x_min(3))^2+(pos_x_max(1)-pos_x_min(1))^2;
+        diff_y = (pos_y_max(3)-pos_y_min(3))^2+(pos_y_max(1)-pos_y_min(1))^2;
+
+        if diff_x > diff_y
+            minpos{ii}(1,:) = pos_x_min;
+            maxpos{ii}(1,:) = pos_x_max;
+        else
+            minpos{ii}(1,:) = pos_y_min;
+            maxpos{ii}(1,:) = pos_y_max;
+        end
+        % Calculate azimuth
+        opp = maxpos{ii}(1) - minpos{ii}(1); % y dimension    
+        adj = maxpos{ii}(3) - minpos{ii}(3); % x dimension
+        azimuth = atan(opp/adj);
+        if isnan(azimuth)
+           azimuth = 0; 
+           opp = 0;
+           adj = 0;
+        end
+        
+        I_azimuth_axis(CC.PixelIdxList{ii}) = abs(sin(azimuth)*opp); 
+        azimuth = 180/pi()*azimuth;
+        if azimuth < 0;
+           azimuth = abs(azimuth)+90; 
+        end
+        I_azimuth_vals(CC.PixelIdxList{ii}) = azimuth;
+    
+    if (floor(ii/5000) == ii/5000)
+        fprintf('%d%% complete \n',round((ii/CC.NumObjects)*100));
+    elseif ii == CC.NumObjects
+        fprintf('Completed block %d \n',process_positions.block_id);
+    end
+end
+
+% if only 1 block save result
+    if process_files.n_blocks == 1
+        results_mat = strcat(process_files.path_for_blocks,...
+                process_files.func_name,'_results_block_',...
+                num2str(process_files.n_blocks),'.mat');
+        struct_out.results_out{1,1} = 'body_id';
+        struct_out.results_out{2,1} = 'body_volume';
+        struct_out.results_out{3,1} = 'body_depth';
+        struct_out.results_out{4,1} = 'body_azimuth';
+        struct_out.results_out{1,2} = I_id;
+        struct_out.results_out{2,2} = I_vol;
+        struct_out.results_out{3,2} = I_depth;
+        struct_out.results_out{4,2} = I_azimuth_vals;
+        struct_out.anomalous_threshold = anomalous_threshold;
+        save(results_mat,'-struct','struct_out','-v7.3');
+    else % multiple blocks
+        I_vol = reshape(I_vol,nz,nil*nxl);
+        I_id = reshape(I_id,nz,nil*nxl);
+        I_azimuth_axis = reshape(I_azimuth_axis,nz,nil*nxl);
+        I_azimuth_vals = reshape(I_azimuth_vals,nz,nil*nxl);
+        I_depth = reshape(I_depth,nz,nil*nxl);   
+
+        % save results from each block as matlab .mat binaries
+        temp_results_mat = strcat(process_files.path_for_blocks,'.temp_',...
+            process_files.func_name,'_block_',num2str(process_positions.block_id),'.mat');
+        save(temp_results_mat,'anomalous_threshold','I_vol','I_id','I_depth','I_azimuth_axis','I_azimuth_vals','-v7.3');
+        
+        temp_results_mat2 = strcat(process_files.path_for_blocks,'temp_',...
+            process_files.func_name,'_block_',num2str(process_positions.block_id),'.mat');
+        system_for = sprintf('mv %s %s',temp_results_mat,temp_results_mat2);
+        system(system_for);
+        
+        if join_block_id == process_positions.block_id; % this will be the node that joins things together
+            clearvars -except process_files
+            merge_anomalous_body_connector(process_files.func_name,process_files.path_for_blocks); 
+        end
+    end
+end
+
+##### SOURCE END #####
+--></body></html>
