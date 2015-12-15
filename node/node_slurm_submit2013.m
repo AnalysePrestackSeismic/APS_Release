@@ -1,4 +1,4 @@
-function [] = node_slurm_submit(algorithm_name,job_meta_path,slurm_part,n_cores,varargin)
+ function [] = node_slurm_submit2013(algorithm_name,job_meta_path,slurm_part,n_cores,varargin)
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -51,7 +51,7 @@ function [] = node_slurm_submit(algorithm_name,job_meta_path,slurm_part,n_cores,
 % water_bottom_flatten(block_mat,process_files_mat,join_block_id)
 
 run_script_path = '/apps/gsc/matlab-library/development/maps/algorithms/';
-matlab_path = '/apps/matlab/v2011a';
+matlab_path = '/apps/matlab/v2013a';
 job_meta = load(job_meta_path);             % load job meta file
 
 randdir = num2str(floor(now*100000));
@@ -95,6 +95,14 @@ elseif strcmp(slurm_part,'UK1')
         system(slurm_purge);
     end
     pause(1);
+elseif strcmp(slurm_part,'Blades_Test')
+    n_nodes = 20;
+    head_node = 'tvlxpbws51 ';
+    for i_node = 1:1:n_nodes
+        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','Blades_Test',run_script_path,'purge_function.sh',randdir,' &');
+        system(slurm_purge);
+    end
+    pause(1);   
 end
 
 %--------------PREPARING ARGUMENTS ------------------
@@ -103,7 +111,7 @@ end
 
 if strcmp(algorithm_name,'seismic_anomaly_spotter')
     n_blocks = varargin{1};
-    n_samps_slice = floor(job_meta.n_samples{str2double(varargin{2})}/str2double(n_blocks));% Number of samples per slice
+    n_samps_slice = floor(job_meta.n_samples{str2double(varargin{2})}/str2double(n_blocks));
     start_block = 1:n_samps_slice:job_meta.n_samples{str2double(varargin{2})};
     end_block = start_block+n_samps_slice-1;
 end
@@ -112,6 +120,14 @@ if strcmp(algorithm_name,'wavelet_estimation')
     varargin{length(varargin)+1} = num2str(job_meta.liveblocks(1));         % Find the first live block from job_meta file and append varargin arraay
 end
 
+if strcmp(algorithm_name,'structural_tensor_dip')
+    %scale_sigma = varargin{1};
+    scale_sigma = varargin{3};
+    sigma = varargin{2};
+    aperture = num2str(str2num(scale_sigma)*str2num(sigma));
+    %add_aperture_to_job_meta(job_meta_path,aperture);
+    %node_slurm_submit('structural_tensor_dip','/data/TZA/segy/2013_kusini_inboard/pgs_enhanced_volume/structural_tensors_dip/job_meta/job_meta_07Oct2014.mat','UK1','4','1','3','1','3000')
+end
 % if you are running int_grad_inv_proj and user has supplied a maxzout
 % horizon mask, edit varargin)
 
@@ -144,9 +160,13 @@ batch_script_path = [job_meta.output_dir,'script_job_',randdir,'_',num2str(rando
 fid_batch = fopen(batch_script_path, 'w');
 fprintf(fid_batch, '#!/bin/sh\n');
 fprintf(fid_batch, 'umask 002\n');
-fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/mcr_cache_umask_friendly/%s\n',randdir);
+if strcmp(slurm_part,'Blades_Test')
+    fprintf(fid_batch, 'MCR_CACHE_ROOT=/localdata/localcache/mcr_cache_umask_friendly/%s\n',randdir); 
+else
+    fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/mcr_cache_umask_friendly/%s\n',randdir); 
+end
 %fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/Paradigm/jonesce/%s\n',randdir);
-fprintf(fid_batch, 'MCRROOT=/apps/matlab/v2011a/ ;\n');
+fprintf(fid_batch, 'MCRROOT=/apps/matlab/v2013a/ ;\n');
 fprintf(fid_batch, 'export MCR_CACHE_ROOT ;\n');
 fprintf(fid_batch, 'export MCRROOT ;\n');
 fprintf(fid_batch, 'mkdir -p ${MCR_CACHE_ROOT} ;\n');
@@ -179,12 +199,19 @@ if strcmp(algorithm_name,'seismic_anomaly_spotter')
         arguments_anom = [num2str(varargin{2}) ' ' num2str(varargin{3}) ' ' num2str(varargin{4}) ' ' num2str(varargin{5}) ' ' num2str(varargin{6}) ' ' num2str(start_block(i_block)) ' ' num2str(end_block(i_block))];
         fprintf(fid_batch, arguments_anom);
         fprintf(fid_batch, ' \nEOF\n');
-        fprintf(fid_batch, '%s\n','sleep 0.05');
+        fprintf(fid_batch, '%s\n','sleep 0.1');
     end  
 %------------FOR ALL OTHER ALGORITHMS -----------------------------------
 else
     if isfield(job_meta, 'liveblocks')    
         loopfin = size(job_meta.liveblocks,1);
+        
+        
+        % Intiating randown times to fall asleep
+        uplim=0.1;
+        lowlim=2;
+        sleeprand = lowlim+rand(1,loopfin+5)*(uplim-lowlim);
+        
         lpi = 1;
        
         if (flag_horizon_mask)
@@ -212,20 +239,26 @@ else
             
             fprintf(fid_batch, arguments);  
             fprintf(fid_batch, ' \nEOF\n');  
-            fprintf(fid_batch, '%s\n','sleep 0.05');
+            fprintf(fid_batch, '%s%s\n','sleep ',num2str(sleeprand(lpi)));
             
         end
     else
-        for i_block = 1:1:str2double(n_blocks)        
+        for i_block = 1:1:str2double(n_blocks)
+            
+            % Intiating randown times to fall asleep
+            uplim=1;
+            lowlim=2;
+            sleeprand = lowlim+rand(1,n_blocks+5)*(uplim-lowlim);
+            
             fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
                 num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',logoutdir,algorithm_name,'_',...
                 num2str(i_block),'.out <<EOF\n']);
-            fprintf(fid_batch, '#!/bin/sh\n');    
+            fprintf(fid_batch, '#!/bin/sh\n');
             fprintf(fid_batch, ['srun ',run_script_path,algorithm_name,'/',...
                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
-            fprintf(fid_batch, arguments);  
-            fprintf(fid_batch, ' \nEOF\n');  
-            fprintf(fid_batch, '%s\n','sleep 0.05'); 
+            fprintf(fid_batch, arguments);
+            fprintf(fid_batch, ' \nEOF\n');
+            fprintf(fid_batch, '%s%s\n','sleep ',num2str(sleeprand(i_block)));
         end
     end
 end
@@ -240,7 +273,7 @@ end
 %         arguments_anom = [num2str(varargin{2}) ' ' num2str(varargin{3}) ' ' num2str(varargin{4}) ' ' num2str(start_block(i_block)) ' ' num2str(end_block(i_block))];
 %         fprintf(fid_batch, arguments_anom);
 %         fprintf(fid_batch, ' %s\n', ' &');
-%         fprintf(fid_batch, '%s\n','sleep 0.05');
+%         fprintf(fid_batch, '%s\n','sleep 0.1');
 %     end   
 % else
 %     if isfield(job_meta, 'liveblocks')    
@@ -257,7 +290,7 @@ end
 %                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
 %             fprintf(fid_batch, arguments);  
 %             fprintf(fid_batch, ' %s\n', ' &');  
-%             fprintf(fid_batch, '%s\n','sleep 0.05');        
+%             fprintf(fid_batch, '%s\n','sleep 0.1');        
 % 
 %         end
 %     else
@@ -268,7 +301,7 @@ end
 %                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
 %             fprintf(fid_batch, arguments);
 %             fprintf(fid_batch, ' %s\n', ' &');
-%             fprintf(fid_batch, '%s\n','sleep 0.05');
+%             fprintf(fid_batch, '%s\n','sleep 0.1');
 %         end
 %     end
 % end
@@ -296,20 +329,10 @@ else
 end
 save(job_meta_path,'-struct','job_meta','-v7.3');
 
-if strcmp(algorithm_name,'structural_tensor_dip')
-    %scale_sigma = varargin{1};
-    scale_sigma = varargin{3};
-    sigma = varargin{2};
-    aperture = num2str(str2num(scale_sigma)*str2num(sigma));
-    save([job_meta_path, '_no_aperture'],'-struct','job_meta','-v7.3');
-    add_aperture_to_job_meta(job_meta_path,aperture);
-    %node_slurm_submit('structural_tensor_dip','/data/TZA/segy/2013_kusini_inboard/pgs_enhanced_volume/structural_tensors_dip/job_meta/job_meta_07Oct2014.mat','UK1','4','1','3','1','3000')
-end
-
 
 % Make the script file executable and log into node 1 to submit the job
 system(['chmod 777 ',batch_script_path]);
-system(['ssh ',head_node,batch_script_path,' &']);
+system(['ssh -x ',head_node,batch_script_path,' &']);
 system('exit');
 fprintf('run the command below to see the job status\n');
 fprintf('sacct --format=JobName%%-30,jobid,elapsed,Start,End,ncpus,ntasks,state,wckey%%-40,nodelist --allusers --starttime=%s  --wckey=%s%s%s\n',datemonprev,randdir,'_',algorithm_name);

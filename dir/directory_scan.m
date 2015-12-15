@@ -47,11 +47,18 @@ for ii=1:1:n_dir
     cd(input_dir{ii});          % change directory to iith lthe input directory
     
     % Figure out the number of files in the current directory
-    [~,nfiles] = (system('ls -B * | wc -l')); 
+     %[~,nfiles] = (system('ls -B * | wc -l'));
+     [~,nfiles] = (system('ls -B | wc -l'));
+    %% SRW TEMP EDIT-----------------
+    %nfiles = '54050'%(system('find -type f -name * | wc -l'));
+    %---------------------------------
     nfiles=str2double(nfiles);
-    
     % Read all filenames and convert from ascii to double
-    [~,fnames] = system('ls -B1 *');
+    %[~,fnames] = system('ls -B1 *');
+    [~,fnames] = system('ls -B1');
+    %% SRW TEMP EDIT -----------------
+    %fnames = fileread('/data/URY/segy/2013_pgs_uruguay_processing/full_area_final_deliverables_phase1_and_2/final_gathers_bg_output/digi_results/sas_min_energy/final_run/test.txt');
+    %---------------------------------
     numeric = double(fnames);
     
     % Preallocate memory for some variables

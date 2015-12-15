@@ -1,4 +1,4 @@
-function [seismic, traces, ilxl_read, offset_read] = node_segy_read(job_meta_path,vol_index,i_block)
+function [seismic, traces, ilxl_read, offset_read] = node_segy_read(job_meta_path,vol_index,i_block,varargin)
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -27,7 +27,8 @@ function [seismic, traces, ilxl_read, offset_read] = node_segy_read(job_meta_pat
 %       job_meta_path = path to job_meta .mat file
 %       vol_index = integer indicating volume to load
 %       i_block = integer indicating which block to load from volume
-%
+%       vargin: Optional extra flags for zmin and zmax to limit the
+%               trace length 
 %   Outputs:
 %       seismic = structure containing seismic header information
 %       traces = seismic traces as matrix (rows samples; columns traces)
@@ -40,10 +41,24 @@ function [seismic, traces, ilxl_read, offset_read] = node_segy_read(job_meta_pat
 %%
 i_block = str2double(i_block);
 job_meta = load(job_meta_path);
+
+ztrunc = 0;
+if ~isempty(varargin)
+    if length(varargin) == 2
+        zmin = varargin{1};
+        zmax = varargin{2};
+        ztrunc = 1;
+    else
+        error('must specify zmin and zmax on command line if using z limits');
+    end
+end
+
+% calculate fold of gather - this should be added to job_meta
 if job_meta.is_gather == 1
     fold = ((job_meta.tkey_max -  job_meta.tkey_min )/ job_meta.tkey_inc) +  1;
 end 
 
+% Error checking for standalone mode.
 if i_block > job_meta.n_blocks
     seismic = NaN;
     traces = NaN;
@@ -53,8 +68,8 @@ if i_block > job_meta.n_blocks
     return
 end
 
+% Lookup traces and find byte location in respective segy file
 vol_keys = segy_index_byte_finder(job_meta_path,job_meta.block_keys(i_block,:),vol_index);
-
 vol_index = str2double(vol_index);
 vol_name = job_meta.volumes{vol_index};
     
@@ -178,14 +193,23 @@ for ii_block = 1:1:size(blocks,1)
                     %[traces{ii_block}(:,is_key:is_key+is_traces_to_read-1), ilxl_read{ii_block}(is_key:is_key+is_traces_to_read-1,:), offset_read{ii_block}(is_key:is_key+is_traces_to_read-1,:)] ...
                     %    = read_traces_segy(seismic,vol_keys{ii_block}(s_key,3)-trc_head,is_traces_to_read);    
                     
-                    
-                    %alloffpres = size(offset_read{28},1)/fold
+%                     for cj = 1:10
+%                         fprintf('%-20d%-20d%-20d%-20d\n',vol_keys{ii_block}(cj,1),vol_keys{ii_block}(cj,2),vol_keys{ii_block}(cj,3),vol_keys{ii_block}(cj,4))
+%                     end
+                    %alloffpres = size(offset_read{28},1)/fold ;% fprintf('%-20d\n',vol_keys{ii_block}(s_key,3))
                     
                     if fold == curtestfold
                         [traces{ii_block}(:,is_key:is_key+is_traces_to_read-1), ilxl_read{ii_block}(is_key:is_key+is_traces_to_read-1,:), offset_read{ii_block}(is_key:is_key+is_traces_to_read-1,:)] ...
                         = read_traces_segy(seismic,vol_keys{ii_block}(s_key,3)-trc_head,is_traces_to_read);   
                     else
-                        [tmptracesblk, tmp_ilxl_read, tmp_offset_read] = read_traces_segy(seismic,vol_keys{ii_block}(s_key,3)-trc_head,is_traces_to_read);   
+                        [tmptracesblk, tmp_ilxl_read, tmp_offset_read] = read_traces_segy(seismic,vol_keys{ii_block}(s_key,3)-trc_head,is_traces_to_read);  
+                        
+                        if sum(diff(tmp_offset_read)) ~= 0
+                            offset_inc=mode(diff(tmp_offset_read));
+                        %if offset_inc==0
+                        else
+                            offset_inc= tmp_offset_read(1);
+                        end
                         
                         %filltraces = zeros(size(tmptracesblk,1),(is_counter-is_key+1)*fold,'single');
                         
@@ -216,7 +240,24 @@ for ii_block = 1:1:size(blocks,1)
                                 tmpilxllist(listi,:) = tmp_ilxl_read(cji,:);
                                 listi = listi + 1;
                             end
-                            finalloc = (locval * fold) + tmp_offset_read(cji) + is_key;
+                            
+%                             if isfield(job_meta,irreg_gath)
+%                                                                 if job_meta.irreg_gath  ~= 1
+%                                 finalloc = (locval * fold) + tmp_offset_read(cji) + is_key;
+%                                 finalloc = (locval * fold) + (floor((tmp_offset_read(cji)-tmp_offset_read(1))/offset_inc)+1) + is_key;
+%                                                                 else % regular sampled data ie angle gathers
+%                                                                     finalloc = (locval * fold) + (floor((tmp_offset_read(cji)-tmp_offset_read(1))/job_meta.tkey_inc)+1) + is_key;
+%                                                                 end
+%                             else
+                                finalloc = (locval * fold) + (floor((tmp_offset_read(cji)-tmp_offset_read(1))/offset_inc)+1) + is_key;
+%                             end
+                            if finalloc > (is_key+((n_traces_to_read)*fold)-1)
+                                fprintf('mode of offset increment not correct, caused by very irregular fold or offset increment of %d\n',offset_inc);
+                            elseif finalloc < 1
+                                fprintf('mode of offset increment not correct, caused by very irregular fold or offset increment of %d\n',offset_inc);
+                                finalloc = 1;
+                                tmp_offset_read(cji) = cji;
+                            end
                             traces{ii_block}(:,finalloc) = tmptracesblk(:,cji);
                             %ilxl_read{ii_block}(finalloc,:) = tmp_ilxl_read(cji,:);
                             offset_read{ii_block}(finalloc,:) = tmp_offset_read(cji);
@@ -240,36 +281,61 @@ for ii_block = 1:1:size(blocks,1)
                     is_key = is_key + is_traces_to_read;
                     is_counter = is_key;
                                       
-                end    
+                end
             end
         end
     else
         % no traces
         seismic = segy_read_binary(strcat(job_meta.paths{1},blocks{ii_block}));
-%         if job_meta.is_gather == 1
-%             traces{ii_block} = zeros(seismic.n_samples,fold,'single');
-%             ilxl_read{ii_block} = zeros(fold,2,'int32');
-%             offset_read{ii_block} = int32(job_meta.tkey_min):int32(job_meta.tkey_inc):int32(job_meta.tkey_max)';
-%         else
-            traces{ii_block} = zeros(seismic.n_samples,1,'single');
-            ilxl_read{ii_block} = int32([0,0]);
-            offset_read{ii_block} = int32(0);
-%         end
+        %         if job_meta.is_gather == 1
+        %             traces{ii_block} = zeros(seismic.n_samples,fold,'single');
+        %             ilxl_read{ii_block} = zeros(fold,2,'int32');
+        %             offset_read{ii_block} = int32(job_meta.tkey_min):int32(job_meta.tkey_inc):int32(job_meta.tkey_max)';
+        %         else
+        traces{ii_block} = zeros(seismic.n_samples,1,'single');
+        ilxl_read{ii_block} = int32([0,0]);
+        offset_read{ii_block} = int32(0);
+        %         end
         
         % could to make zero entry
     end
 end
 %%
-    traces = cell2mat(traces);  
+    if ztrunc == 1
+        %truncate the cell of traces
+        for ii_block = 1:1:size(blocks,1)
+            traces{ii_block} = traces{ii_block}(zmin:zmax,:);
+        end    
+        % modify seismic structure to reflect the changes
+        seismic.n_samples = (zmax - zmin )+ 1;
+        seismic.firstsample = zmin; 
+    end
+%     if isfield(job_meta,'incl_poly')
+%         for ii_block = 1:1:size(blocks,1)
+%             il_r=ilxl_read(:,1);
+%             xl_r=ilxl_read(:,2);
+%             [IN ON] = inpolygon(coo(:,1),coo(:,2),il_poly,xl_poly);
+%             INN=IN|ON;
+%             
+%             
+%             
+%             traces{ii_block} = traces{ii_block}(zmin:zmax,:);
+%         end
+%     end
+    
+    traces = cell2mat(traces);
     %cj fell over here
     ilxl_read = cell2mat(ilxl_read');
     zero_log = ilxl_read(:,1) ~= 0;
     ilxl_read = ilxl_read(zero_log,:);
+    
     traces = traces(:,zero_log);
+    
    % ilxl_read = ilxl_read';
     offset_read = cell2mat(offset_read');
     offset_read = offset_read(zero_log);
     offset_read = offset_read';
+    
 end
         
 function [traces,ilxl_read,offset_read] = read_traces_segy(seismic,start_byte,n_traces_to_read)

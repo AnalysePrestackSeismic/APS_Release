@@ -1,4 +1,4 @@
-function [] = node_slurm_submit(algorithm_name,job_meta_path,slurm_part,n_cores,varargin)
+ function [] = node_slurm_submit_neo_restart(algorithm_name,job_meta_path,slurm_part,n_cores,current_wckey,varargin)
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -29,9 +29,13 @@ function [] = node_slurm_submit(algorithm_name,job_meta_path,slurm_part,n_cores,
 %       cluster. This should have already been compiled using compile_function
 %       job_meta_path = path to job_meta .mat file contain meta data
 %       slurm_part = slurm partition to use
-%       n_cores = specify how many cores the job requires. Used by -c flag
+%       %n_cores = specify how many cores the job requires. Used by -c flag
+%       n_cores = specify how many jobs to run per node, ie 8 will set the
+%       mem flag to allow max of 8 jobs per empty node, min 1 max 12
 %       in slurm. Helpful for jobs that require more memory or that
 %       multi-thread
+%       current_wckey = the current job key from slurm, found in job.meta
+%       or printed out by node_slurm_submit or by segy_plot_run_jobs
 %       varargin = algorithm specific flags to control arguments. By
 %       default all algorithms require the following arguments:
 %           job_meta_path
@@ -44,16 +48,101 @@ function [] = node_slurm_submit(algorithm_name,job_meta_path,slurm_part,n_cores,
 %   Writes to Disk:
 %       Log Files
 % Notes: You may want to QC the running of the job using segy_plot_run_jobs.m
+%============================================================================================================================
 
 %%
 % submit compiled matlab function slurm
 % arguments cell array needs to be in correct order
 % water_bottom_flatten(block_mat,process_files_mat,join_block_id)
-
+altnodes = {'sblxpghn100 ','sblxpgcn192 ','sblxpgcn182 '}; 
 run_script_path = '/apps/gsc/matlab-library/development/maps/algorithms/';
-matlab_path = '/apps/matlab/v2011a';
+matlab_path = '/apps/matlab/v2013a';
+sshstat = 1;
+no_lines_ssh_header = 5;
+findfailed = 0;  % if this is set to anything other than 0 it finds only the failed jobs, otherwise finds the completed jobs and reruns anything that has not completed
+%=============================================================================================================================
+%
+% try to see if the head node is contactable otherwise try
+% alternate nodes
+fprintf('testing to contact head node or try alternate\n');
+for hnloop = 1:1:size(altnodes,2)
+    fprintf('testing to contact node %s \n',altnodes{hnloop});
+    [sshstat,sshreply] = system(['ssh -x ',altnodes{hnloop},' date']);
+    %
+    if sshstat == 0
+        head_node = altnodes{hnloop};
+        fprintf('selected node %s as head node\n',altnodes{hnloop});
+        break;
+    end
+end
+%
+if sshstat == 1 % if node not contacted then just fail
+    fprintf('no node contactable, exiting\n');
+    return;
+end
+%=============================================================================================================================
+%
+
+% find the failed jobs
 job_meta = load(job_meta_path);             % load job meta file
 
+alljobs = job_meta.liveblocks;
+limitnodes = '';
+%limitnodes = ' --nodelist=tvlxpgcn[71-73,75] ';
+
+%get current slurm job
+datemonprev = datestr((now-100),29);
+
+%declare array for jobstatus
+jobstatus = zeros(size(job_meta.liveblocks,1),1);
+
+%loop round getting all the jobstatus , did not get all at the same time to
+%reduce length of string passed back from system
+%
+check_path = regexp(current_wckey,'/');
+if ~isempty(check_path) && check_path(1) == 1 % load file
+    job_meta.liveblocks = dlmread(current_wckey);
+else
+    if findfailed == 0
+        jobcom = ['ssh -x ',head_node,' sacct --format=JobName%-40 --noheader --state=completed --allusers --starttime=',datemonprev,' --wckey=',current_wckey];
+        %jobcom = ['sacct --format=JobName%-40 --noheader --state=completed --allusers --starttime=2014-12-29 --wckey=',current_wckey];
+        
+    else
+        jobcom = ['ssh -x ',head_node,'sacct --format=JobName%-40 --noheader --state=F --allusers --starttime=',datemonprev,' --wckey=',current_wckey];
+        %jobcom = ['sacct --format=JobName%-40 --noheader --state=F --allusers --starttime=2015-01-09 --wckey=',current_wckey];
+    end
+    [~,jobs] = system(jobcom);   
+    jobcell = deblank(regexp(jobs,'\n','split'));
+    %jobcell = deblank(regexp(jobs,'\n','split'));
+    if size(jobcell,2) < (no_lines_ssh_header+1) % if node not contacted then just fail
+        fprintf('no jobs found, wckey wrong or database not responding, exiting\n');
+        return;
+    end
+    
+    cjiic = 1;
+    for cjii = no_lines_ssh_header:1:(size(jobcell,2)-1)
+        tmpcell = regexp(jobcell{1,cjii}, '_','split');
+        if ~isempty(regexpi(tmpcell{1,end},'[0-9]+'))            
+            jobstatus(cjiic) = str2double(tmpcell{1,end});
+            cjiic = cjiic + 1;
+        end
+    end
+    
+    % Find the live blocks which satifies your condition (failed) and
+    % update the live blocks entry under job meta path. Hence you dont save
+    % job_meta file at the end of this program
+    if findfailed == 0
+        job_meta.liveblocks = alljobs(ismember(alljobs,jobstatus) == 0);
+    else
+        job_meta.liveblocks = alljobs(ismember(alljobs,jobstatus) == 1);
+    end
+end
+% 
+
+%=============================================================================================================================
+%
+mem_per_core =  round(250000/(str2double(n_cores)+0.2));
+n_cores = '1';
 randdir = num2str(floor(now*100000));
 datemonprev = datestr((now-100),29);
 [~,usrname] = system('whoami');
@@ -74,27 +163,38 @@ end
 
 % function should be compiled as single threaded so a simple call to srun
 % can be used
-% Thames [01-16]
-% UK1 [51-56, 58-98]
-% AllDC [01-16,51-56,58-98]
-if strcmp(slurm_part,'Thames') || strcmp(slurm_part,'AllDC') 
-    n_nodes = 16;
-    head_node = 'tvlxpgcn01 ';
+% garnet [185-192]
+% topaz [101-184]
+% olivine [101-192]
+%
+
+%
+if strcmp(slurm_part,'olivine') || strcmp(slurm_part,'othertopaz') 
+    n_nodes = 192;
+    %head_node = 'sblxpghn100 ';
     %head_node = 'tvlxpgcn100 ';
     for i_node = 1:1:n_nodes
-        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','Thames',run_script_path,'purge_function.sh',randdir,' &');
+        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','olivine',run_script_path,'purge_functioncj.sh',randdir,' &');
         system(slurm_purge);
     end
     pause(1);
-elseif strcmp(slurm_part,'UK1')
-    n_nodes = 48;
-    head_node = 'tvlxpgcn53 ';
+elseif strcmp(slurm_part,'garnet')
+    n_nodes = 8;
+    %head_node = 'sblxpghn100 ';
     %head_node = 'tvlxpgcn101 ';
     for i_node = 1:1:n_nodes
-        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','UK1',run_script_path,'purge_function.sh',randdir,' &');
+        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','garnet',run_script_path,'purge_functioncj.sh',randdir,' &');
         system(slurm_purge);
     end
     pause(1);
+elseif strcmp(slurm_part,'topaz')
+    n_nodes = 84;
+    %head_node = 'sblxpghn100 ';
+    for i_node = 1:1:n_nodes
+        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','topaz',run_script_path,'purge_functioncj.sh',randdir,' &');
+        system(slurm_purge);
+    end
+    pause(1);   
 end
 
 %--------------PREPARING ARGUMENTS ------------------
@@ -103,7 +203,7 @@ end
 
 if strcmp(algorithm_name,'seismic_anomaly_spotter')
     n_blocks = varargin{1};
-    n_samps_slice = floor(job_meta.n_samples{str2double(varargin{2})}/str2double(n_blocks));% Number of samples per slice
+    n_samps_slice = floor(job_meta.n_samples{str2double(varargin{2})}/str2double(n_blocks));
     start_block = 1:n_samps_slice:job_meta.n_samples{str2double(varargin{2})};
     end_block = start_block+n_samps_slice-1;
 end
@@ -112,6 +212,14 @@ if strcmp(algorithm_name,'wavelet_estimation')
     varargin{length(varargin)+1} = num2str(job_meta.liveblocks(1));         % Find the first live block from job_meta file and append varargin arraay
 end
 
+if strcmp(algorithm_name,'structural_tensor_dip')
+    %scale_sigma = varargin{1};
+    scale_sigma = varargin{3};
+    sigma = varargin{2};
+    aperture = num2str(str2num(scale_sigma)*str2num(sigma));
+    %add_aperture_to_job_meta(job_meta_path,aperture);
+    %node_slurm_submit('structural_tensor_dip','/data/TZA/segy/2013_kusini_inboard/pgs_enhanced_volume/structural_tensors_dip/job_meta/job_meta_07Oct2014.mat','UK1','4','1','3','1','3000')
+end
 % if you are running int_grad_inv_proj and user has supplied a maxzout
 % horizon mask, edit varargin)
 
@@ -144,9 +252,13 @@ batch_script_path = [job_meta.output_dir,'script_job_',randdir,'_',num2str(rando
 fid_batch = fopen(batch_script_path, 'w');
 fprintf(fid_batch, '#!/bin/sh\n');
 fprintf(fid_batch, 'umask 002\n');
-fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/mcr_cache_umask_friendly/%s\n',randdir);
+if strcmp(slurm_part,'Blades_Test')
+    fprintf(fid_batch, 'MCR_CACHE_ROOT=/localdata/localcache/mcr_cache_umask_friendly/%s\n',randdir); 
+else
+    fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/mcr_cache_umask_friendly/%s\n',randdir); 
+end
 %fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/Paradigm/jonesce/%s\n',randdir);
-fprintf(fid_batch, 'MCRROOT=/apps/matlab/v2011a/ ;\n');
+fprintf(fid_batch, 'MCRROOT=/apps/matlab/v2013a/ ;\n');
 fprintf(fid_batch, 'export MCR_CACHE_ROOT ;\n');
 fprintf(fid_batch, 'export MCRROOT ;\n');
 fprintf(fid_batch, 'mkdir -p ${MCR_CACHE_ROOT} ;\n');
@@ -168,9 +280,9 @@ fprintf(fid_batch, 'export XAPPLRESDIR;\n');
 %%--------Constructing Script Portion specific to the algorithm used----
 %--------------FOR SEISMIC ANOMALY SPOTTER_----------------------------
 if strcmp(algorithm_name,'seismic_anomaly_spotter')
-    for i_block = 1:1:str2double(n_blocks)        
-        fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
-            num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',logoutdir,algorithm_name,'_',...
+    for i_block = 1:1:str2double(n_blocks)
+               fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' --mem=',num2str(mem_per_core),' -J ',algorithm_name,'_',...
+            num2str(i_block),' --wckey=',current_wckey,' -o ',logoutdir,algorithm_name,'_',...
             num2str(i_block),'.out <<EOF\n']);
         
         fprintf(fid_batch, '#!/bin/sh\n');
@@ -179,12 +291,19 @@ if strcmp(algorithm_name,'seismic_anomaly_spotter')
         arguments_anom = [num2str(varargin{2}) ' ' num2str(varargin{3}) ' ' num2str(varargin{4}) ' ' num2str(varargin{5}) ' ' num2str(varargin{6}) ' ' num2str(start_block(i_block)) ' ' num2str(end_block(i_block))];
         fprintf(fid_batch, arguments_anom);
         fprintf(fid_batch, ' \nEOF\n');
-        fprintf(fid_batch, '%s\n','sleep 0.05');
+        fprintf(fid_batch, '%s\n','sleep 0.1');
     end  
 %------------FOR ALL OTHER ALGORITHMS -----------------------------------
 else
     if isfield(job_meta, 'liveblocks')    
         loopfin = size(job_meta.liveblocks,1);
+        
+        
+        % Intiating randown times to fall asleep
+        uplim=0.1;
+        lowlim=2;
+        sleeprand = lowlim+rand(1,loopfin+5)*(uplim-lowlim);
+        
         lpi = 1;
        
         if (flag_horizon_mask)
@@ -204,76 +323,37 @@ else
             end
             %------------------------------------------------------
             lpi = lpi + 1;
-            fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
-                num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',logoutdir,algorithm_name,'_',num2str(i_block),'.out <<EOF\n']);
+            fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' --mem=',num2str(mem_per_core),' -J ',algorithm_name,'_',...
+                num2str(i_block),' --wckey=',current_wckey,' -o ',logoutdir,algorithm_name,'_',num2str(i_block),'.out <<EOF\n']);
             fprintf(fid_batch, '#!/bin/sh\n');    
             fprintf(fid_batch, ['srun ',run_script_path,algorithm_name,'/',...
                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
             
             fprintf(fid_batch, arguments);  
             fprintf(fid_batch, ' \nEOF\n');  
-            fprintf(fid_batch, '%s\n','sleep 0.05');
+            fprintf(fid_batch, '%s%s\n','sleep ',num2str(sleeprand(lpi)));
             
         end
     else
-        for i_block = 1:1:str2double(n_blocks)        
-            fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
-                num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',logoutdir,algorithm_name,'_',...
+        for i_block = 1:1:str2double(n_blocks)
+            
+            % Intiating randown times to fall asleep
+            uplim=1;
+            lowlim=2;
+            sleeprand = lowlim+rand(1,n_blocks+5)*(uplim-lowlim);
+            
+            fprintf(fid_batch, ['sbatch -p ',slurm_part,' -c ',n_cores,' --mem=',num2str(mem_per_core),' -J ',algorithm_name,'_',...
+                num2str(i_block),' --wckey=',current_wckey,' -o ',logoutdir,algorithm_name,'_',...
                 num2str(i_block),'.out <<EOF\n']);
-            fprintf(fid_batch, '#!/bin/sh\n');    
+            fprintf(fid_batch, '#!/bin/sh\n');
             fprintf(fid_batch, ['srun ',run_script_path,algorithm_name,'/',...
                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
-            fprintf(fid_batch, arguments);  
-            fprintf(fid_batch, ' \nEOF\n');  
-            fprintf(fid_batch, '%s\n','sleep 0.05'); 
+            fprintf(fid_batch, arguments);
+            fprintf(fid_batch, ' \nEOF\n');
+            fprintf(fid_batch, '%s%s\n','sleep ',num2str(sleeprand(i_block)));
         end
     end
 end
-
-
-% if strcmp(algorithm_name,'seismic_anomaly_spotter')
-%     for i_block = 1:1:str2double(n_blocks)        
-%         fprintf(fid_batch, ['srun -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
-%             num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',job_meta.output_dir,algorithm_name,'_',...
-%             num2str(i_block),'.out ',run_script_path,algorithm_name,'/',...
-%             algorithm_name,' ',job_meta_path,' ']);
-%         arguments_anom = [num2str(varargin{2}) ' ' num2str(varargin{3}) ' ' num2str(varargin{4}) ' ' num2str(start_block(i_block)) ' ' num2str(end_block(i_block))];
-%         fprintf(fid_batch, arguments_anom);
-%         fprintf(fid_batch, ' %s\n', ' &');
-%         fprintf(fid_batch, '%s\n','sleep 0.05');
-%     end   
-% else
-%     if isfield(job_meta, 'liveblocks')    
-%         loopfin = size(job_meta.liveblocks,1);
-%         lpi = 1;
-%         %while lpi <= 20
-%         while lpi <= loopfin
-%         %for i_block = 1:1:str2double(n_blocks)
-%             i_block = job_meta.liveblocks(lpi);
-%             lpi = lpi + 1;
-%             fprintf(fid_batch, ['srun -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
-%                 num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',job_meta.output_dir,algorithm_name,'_',...
-%                 num2str(i_block),'.out ',run_script_path,algorithm_name,'/',...
-%                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
-%             fprintf(fid_batch, arguments);  
-%             fprintf(fid_batch, ' %s\n', ' &');  
-%             fprintf(fid_batch, '%s\n','sleep 0.05');        
-% 
-%         end
-%     else
-%         for i_block = 1:1:str2double(n_blocks)        
-%             fprintf(fid_batch, ['srun -p ',slurm_part,' -c ',n_cores,' -J ',algorithm_name,'_',...
-%                 num2str(i_block),' --wckey=',randdir,'_',algorithm_name,' -o ',job_meta.output_dir,algorithm_name,'_',...
-%                 num2str(i_block),'.out ',run_script_path,algorithm_name,'/',...
-%                 algorithm_name,' ',job_meta_path,' ',num2str(i_block)]);
-%             fprintf(fid_batch, arguments);
-%             fprintf(fid_batch, ' %s\n', ' &');
-%             fprintf(fid_batch, '%s\n','sleep 0.05');
-%         end
-%     end
-% end
-
-
 
 %fprintf(fid, '%s\n', ['echo "',n_blocks,' jobs submitted to SLURM partition ',slurm_part,'"']);
 fprintf(fid_batch, '%s\n', 'exit');
@@ -287,31 +367,21 @@ if (flag_horizon_mask)
    arguments = sprintf('%s %s',arguments_crop,char(horizon_path));   % Append arguments string by horizon_path if horizon mask used.
 end
 
-newcommand = {strcat(randdir,'_',algorithm_name),['node_slurm_submit ',algorithm_name,' ',job_meta_path,' ',slurm_part,' ',n_cores,' ',arguments]};
+%newcommand = {strcat(randdir,'_',algorithm_name),['node_slurm_submit ',algorithm_name,' ',job_meta_path,' ',slurm_part,' ',n_cores,' ',arguments]};
 %newcommand{end,1}
-if isfield(job_meta,'comm_history')
-    job_meta.comm_history = [job_meta.comm_history;newcommand];
-else
-    job_meta.comm_history = newcommand;
-end
-save(job_meta_path,'-struct','job_meta','-v7.3');
-
-if strcmp(algorithm_name,'structural_tensor_dip')
-    %scale_sigma = varargin{1};
-    scale_sigma = varargin{3};
-    sigma = varargin{2};
-    aperture = num2str(str2num(scale_sigma)*str2num(sigma));
-    save([job_meta_path, '_no_aperture'],'-struct','job_meta','-v7.3');
-    add_aperture_to_job_meta(job_meta_path,aperture);
-    %node_slurm_submit('structural_tensor_dip','/data/TZA/segy/2013_kusini_inboard/pgs_enhanced_volume/structural_tensors_dip/job_meta/job_meta_07Oct2014.mat','UK1','4','1','3','1','3000')
-end
+% if isfield(job_meta,'comm_history')
+%     job_meta.comm_history = [job_meta.comm_history;newcommand];
+% else
+%     job_meta.comm_history = newcommand;
+% end
+% save(job_meta_path,'-struct','job_meta','-v7.3');
 
 
 % Make the script file executable and log into node 1 to submit the job
 system(['chmod 777 ',batch_script_path]);
-system(['ssh ',head_node,batch_script_path,' &']);
+system(['ssh -x ',head_node,batch_script_path,' &']);
 system('exit');
 fprintf('run the command below to see the job status\n');
-fprintf('sacct --format=JobName%%-30,jobid,elapsed,Start,End,ncpus,ntasks,state,wckey%%-40,nodelist --allusers --starttime=%s  --wckey=%s%s%s\n',datemonprev,randdir,'_',algorithm_name);
+fprintf('sacct --format=JobName%%-30,jobid,elapsed,Start,End,ncpus,ntasks,state,wckey%%-40,nodelist --allusers --starttime=%s  --wckey=%s\n',datemonprev,current_wckey);
 
 end

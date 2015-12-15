@@ -1,4 +1,5 @@
-function wavelet_plot_norm_inversion(job_meta_path)
+function wavelet_plot_norm_inversion(job_meta_path,plot_on)
+
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -23,10 +24,15 @@ function wavelet_plot_norm_inversion(job_meta_path)
 %% ------------------ FUNCTION DEFINITION ---------------------------------
 %this make a plot of the normalised wavelets for qc
 
+%UNTITLED4 Summary of this function goes here
+%   Detailed explanation goes here
+
+
+
 % Load job meta information
 job_meta = load(job_meta_path);
 
-plot_on = 2;
+plot_on = str2double(plot_on);
 
 
 if job_meta.is_gather == 0

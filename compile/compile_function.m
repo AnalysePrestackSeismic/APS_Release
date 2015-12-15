@@ -76,6 +76,8 @@ fprintf('Function %s successfully compiled to:\n%s\n',algorithm_name,func_path);
 system(['chmod 777 ',func_path,algorithm_name]);
 system(['chmod 777 ',func_path,'run_',algorithm_name,'.sh']);
 
+fprintf('\n Please restart MATLAB to release the Compiler license');
+
 end
 
 

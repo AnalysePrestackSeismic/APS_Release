@@ -1,55 +1,29 @@
-function [] = node_slurm_submit(algorithm_name,job_meta_path,slurm_part,n_cores,varargin)
-%% ------------------ Disclaimer  ------------------
-% 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) makes no representation or warranty, express or implied, in 
-% respect to the quality, accuracy or usefulness of this repository. The code
-% is this repository is supplied with the explicit understanding and 
-% agreement of recipient that any action taken or expenditure made by 
-% recipient based on its examination, evaluation, interpretation or use is 
-% at its own risk and responsibility.
-% 
-% No representation or warranty, express or implied, is or will be made in 
-% relation to the accuracy or completeness of the information in this 
-% repository and no responsibility or liability is or will be accepted by 
-% BG Group plc or any of its respective subsidiaries, affiliates and 
-% associated companies (or by any of their respective officers, employees 
-% or agents) in relation to it.
-%% ------------------ License  ------------------ 
-% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
-%% github
-% https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-% node_slurm_submit: function to submit jobs to cluster. A specific
-% algorithm is specified and this each block is processed in parallel on a
-% cluster
-%   Arguments:
-%       algorithm_name = the algorithm that should be submitted to the
-%       cluster. This should have already been compiled using compile_function
-%       job_meta_path = path to job_meta .mat file contain meta data
-%       slurm_part = slurm partition to use
-%       n_cores = specify how many cores the job requires. Used by -c flag
-%       in slurm. Helpful for jobs that require more memory or that
-%       multi-thread
-%       varargin = algorithm specific flags to control arguments. By
-%       default all algorithms require the following arguments:
-%           job_meta_path
-%           i_block
-%           custom arguments can be added '30','1','30','0','1'
-%
-%   Outputs:
-%       none
-%
-%   Writes to Disk:
-%       Log Files
+function [] = node_slurm_submit_overflow(algorithm_name,job_meta_path,slurm_part,n_cores,varargin)
+%function [] = node_slurm_submit_lite(algorithm_name,n_blocks,seismic_mat_path,slurm_part,number_cores,varargin)
+%% Function Description
+% Inputs:
+    % algorithm_name:
+    % job_meta_path:
+    % slurm_part:
+    % n_cores:
+    % varargin:
+
+% Outputs: Void
+
+% Writes to Disk:
+    % Log Files
+    
 % Notes: You may want to QC the running of the job using segy_plot_run_jobs.m
 
 %%
+
 % submit compiled matlab function slurm
 % arguments cell array needs to be in correct order
 % water_bottom_flatten(block_mat,process_files_mat,join_block_id)
 
+
+slurm_part = 'Blades_Test';
+n_cores = '2';
 run_script_path = '/apps/gsc/matlab-library/development/maps/algorithms/';
 matlab_path = '/apps/matlab/v2011a';
 job_meta = load(job_meta_path);             % load job meta file
@@ -76,11 +50,11 @@ end
 % can be used
 % Thames [01-16]
 % UK1 [51-56, 58-98]
-% AllDC [01-16,51-56,58-98]
-if strcmp(slurm_part,'Thames') || strcmp(slurm_part,'AllDC') 
+% All [01-16,51-56,58-98]
+%
+if strcmp(slurm_part,'Thames')
     n_nodes = 16;
     head_node = 'tvlxpgcn01 ';
-    %head_node = 'tvlxpgcn100 ';
     for i_node = 1:1:n_nodes
         slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','Thames',run_script_path,'purge_function.sh',randdir,' &');
         system(slurm_purge);
@@ -89,12 +63,19 @@ if strcmp(slurm_part,'Thames') || strcmp(slurm_part,'AllDC')
 elseif strcmp(slurm_part,'UK1')
     n_nodes = 48;
     head_node = 'tvlxpgcn53 ';
-    %head_node = 'tvlxpgcn101 ';
     for i_node = 1:1:n_nodes
         slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','UK1',run_script_path,'purge_function.sh',randdir,' &');
         system(slurm_purge);
     end
     pause(1);
+elseif strcmp(slurm_part,'Blades_Test')
+    n_nodes = 20;
+    head_node = 'tvlxpbws51 ';
+    for i_node = 1:1:n_nodes
+        slurm_purge = sprintf('srun -p %s -n 1 --exclusive %s %s %s %s','Blades_Test',run_script_path,'purge_function.sh',randdir,' &');
+        system(slurm_purge);
+    end
+    pause(1);    
 end
 
 %--------------PREPARING ARGUMENTS ------------------
@@ -103,7 +84,7 @@ end
 
 if strcmp(algorithm_name,'seismic_anomaly_spotter')
     n_blocks = varargin{1};
-    n_samps_slice = floor(job_meta.n_samples{str2double(varargin{2})}/str2double(n_blocks));% Number of samples per slice
+    n_samps_slice = floor(job_meta.n_samples{str2double(varargin{2})}/str2double(n_blocks));
     start_block = 1:n_samps_slice:job_meta.n_samples{str2double(varargin{2})};
     end_block = start_block+n_samps_slice-1;
 end
@@ -144,7 +125,7 @@ batch_script_path = [job_meta.output_dir,'script_job_',randdir,'_',num2str(rando
 fid_batch = fopen(batch_script_path, 'w');
 fprintf(fid_batch, '#!/bin/sh\n');
 fprintf(fid_batch, 'umask 002\n');
-fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/mcr_cache_umask_friendly/%s\n',randdir);
+fprintf(fid_batch, 'MCR_CACHE_ROOT=/localdata/localcache/%s\n',randdir);
 %fprintf(fid_batch, 'MCR_CACHE_ROOT=/localcache/Paradigm/jonesce/%s\n',randdir);
 fprintf(fid_batch, 'MCRROOT=/apps/matlab/v2011a/ ;\n');
 fprintf(fid_batch, 'export MCR_CACHE_ROOT ;\n');
@@ -296,22 +277,12 @@ else
 end
 save(job_meta_path,'-struct','job_meta','-v7.3');
 
-if strcmp(algorithm_name,'structural_tensor_dip')
-    %scale_sigma = varargin{1};
-    scale_sigma = varargin{3};
-    sigma = varargin{2};
-    aperture = num2str(str2num(scale_sigma)*str2num(sigma));
-    save([job_meta_path, '_no_aperture'],'-struct','job_meta','-v7.3');
-    add_aperture_to_job_meta(job_meta_path,aperture);
-    %node_slurm_submit('structural_tensor_dip','/data/TZA/segy/2013_kusini_inboard/pgs_enhanced_volume/structural_tensors_dip/job_meta/job_meta_07Oct2014.mat','UK1','4','1','3','1','3000')
-end
-
 
 % Make the script file executable and log into node 1 to submit the job
 system(['chmod 777 ',batch_script_path]);
 system(['ssh ',head_node,batch_script_path,' &']);
 system('exit');
 fprintf('run the command below to see the job status\n');
-fprintf('sacct --format=JobName%%-30,jobid,elapsed,Start,End,ncpus,ntasks,state,wckey%%-40,nodelist --allusers --starttime=%s  --wckey=%s%s%s\n',datemonprev,randdir,'_',algorithm_name);
+fprintf('sacct --format=JobName%%-30,jobid,elapsed,Start,End,ncpus,ntasks,state,wckey%%-40,nodelist --allusers  --starttime=%s  --wckey=%s%s%s\n',datemonprev,randdir,'_',algorithm_name);
 
 end

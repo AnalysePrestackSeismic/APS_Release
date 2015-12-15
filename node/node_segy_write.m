@@ -1,4 +1,4 @@
-function [] = node_segy_write(results_out,i_block, sample_rate, output_dir, varargin)
+function [file_name] = node_segy_write(results_out,i_block, sample_rate, output_dir, varargin)
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -39,16 +39,36 @@ function [] = node_segy_write(results_out,i_block, sample_rate, output_dir, vara
 %       files at location specified by output_dir
 
 %%
+ztrunc = 0;
+if ~isempty(varargin)
+    if length(varargin) == 1
+        zmin = varargin{1};
+        ztrunc = 1;
+    else
+        error('must specify zmin on command line if using z limits');
+    end
+end
+
 n_results = size(results_out,1);
 for i_results = 2:1:n_results % top row in results is meta inforation includes output directory (can either be local to node or on system)
     %file_name = fullfile(output_dir, sprintf('%s_result_block_%d%s',results_out{i_results,1},i_block,'.segy'));
     %file_name = fullfile(output_dir, sprintf('%s_block_%d',results_out{i_results,1},i_block),'.segy');
     out_dir = strcat(output_dir,results_out{i_results,1},'/');
     
-    if ~exist(out_dir,'dir')
-       mkdir(out_dir); 
-    end
+%     if ~exist(out_dir,'dir')
+%         mkdir(out_dir);
+%     end
     
+    % check to see if the directory exists
+    if exist(out_dir,'dir') == 0
+        mkdir(out_dir);
+    else
+        system('sleep 2');
+        if exist(out_dir,'dir') == 0
+            mkdir(out_dir);
+        end
+    end
+
     file_name = fullfile(out_dir, sprintf('%s_block_%d%s',results_out{i_results,1},i_block,'.segy'));
     
     % separate folder for each i_results
@@ -68,13 +88,25 @@ for i_results = 2:1:n_results % top row in results is meta inforation includes o
     block_sz = 100; % Number of traces written at a time
     
     %% Initialise files and headers
-    fid_ilxl_f32 = fopen(file_name,'w'); % Open file for writing
+    [fid_ilxl_f32, errmess] = fopen(file_name,'w'); % Open file for writing
+    if sum(size(errmess)) > 0
+        system('sleep 20')
+        [fid_ilxl_f32, errmess] = fopen(file_name,'w'); % Open file for writing
+    end
     header = zeros(60,block_sz,'int32'); % Define zero matrix in dimensions of header.
     
     % Set an array for the coordinate scalar as int16 packed into int32 data
     tmpcolscal = zeros(1,(block_sz*2),'int16');
     tmpcolscal(1:2:size(tmpcolscal,2)) = coscal_val;
     tmpcolscal2 = typecast(tmpcolscal,'int32');
+    
+%     if ztrunc == 1
+%         % Set an array for the coordinate scalar as int16 packed into int32 data
+%         tmpzmin = zeros(1,(block_sz*2),'int16');
+%         tmpzmin(1:2:size(tmpzmin,2)) = zmin;
+%         tmpcolscal2 = typecast(tmpzmin,'int32');
+%     end
+    
     
     % Define binary header
     bin_header = zeros(200,1,'uint16'); % Define zero vector as size of trace header
@@ -115,6 +147,12 @@ for i_results = 2:1:n_results % top row in results is meta inforation includes o
             tmpcolscal = zeros(1,(block_sz*2),'int16');
             tmpcolscal(1:2:size(tmpcolscal,2)) = coscal_val;
             tmpcolscal2 = typecast(tmpcolscal,'int32');
+%             if ztrunc == 1
+%                 % Set an array for the coordinate scalar as int16 packed into int32 data
+%                 tmpzmin = zeros(1,(block_sz*2),'int16');
+%                 tmpzmin(1:2:size(tmpzmin,2)) = zmin;
+%                 tmpcolscal2 = typecast(tmpzmin,'int32');
+%             end
         end
         
         temparr = typecast(single(reshape(results_out{i_results,2}(:,ii:maxblock),1,(n_samples*(maxblock-ii+1)))),'int32');
@@ -129,8 +167,14 @@ for i_results = 2:1:n_results % top row in results is meta inforation includes o
         % which is 65536
         temparr2(8,:) = 65536;
         
-        % To write the int16 coordinate scalar as -100 as int32 in to byte location 71
+        % To write the int16 coordinate scalar as -100 as int16 in to byte location 71
         temparr2(18,:) = tmpcolscal2;
+        
+        if ztrunc == 1
+            % To write the int16 delay recording time header as int16 in to
+            % byte location 109
+            temparr2(28,:) = zmin*65536;
+        end
         
         % to write the no of samples into trace header 115 as 16 bit integer
         temparr2(29,:) = n_samples;
@@ -208,7 +252,9 @@ for i_results = 2:1:n_results % top row in results is meta inforation includes o
     %fwrite(fid_write,[filepath_binary';seismic.file_type;seismic.s_rate;seismic.n_samples;seismic.n_traces;il_byte;xl_byte;offset_byte],'double');  
     % need to set is_gather
     fwrite(fid_write,filepath_binary','double'); 
-    fwrite(fid_write,[bin_header(13);bin_header(9);bin_header(11);size(results_out{i_results,2},2);189;193;37;results_out{i_results,3}],'double'); 
+    tmptraces = size(results_out{i_results,2},2);
+    %fwrite(fid_write,[bin_header(13);bin_header(9);bin_header(11);tmptraces;189;193;37;results_out{i_results,3}],'double'); 
+    fwrite(fid_write,[cast(bin_header(13),'double');cast(bin_header(9),'double');cast(bin_header(11),'double');tmptraces;189;193;37;results_out{i_results,3}],'double'); 
     fwrite(fid_write,reshape(compress_ilxl_bytes',[],1),'double');  
     fclose(fid_write);
     
