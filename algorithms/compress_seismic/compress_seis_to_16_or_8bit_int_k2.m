@@ -1,4 +1,4 @@
-function [ trim_data_filt, scalars_out, zlocs_out, tpgrad_orig, scalepeak,  orig_nsamples, percenterr ] = compress_seis_to_16_or_8bit_int_j( trim_data, morecompress, envlplot )
+function [ trim_data_filt, scalars_out, zlocs_out, tpgrad_orig, scalepeak,  orig_nsamples, percenterr ] = compress_seis_to_16_or_8bit_int_k2( trim_data, morecompress, envlplot )
 %
 %% ------------------ Disclaimer  ------------------
 %
@@ -69,7 +69,8 @@ intrlen = size(trim_data,1);
 intrlen_orig = intrlen;
 orig_nsamples = uint16(intrlen);
 percenterr = zeros(no_of_traces,1,'single');
-%
+% number of envelopes to try
+nl = 12;
 %outplot = 0;
 firstpos = single(0);
 endpos = single(0);
@@ -78,7 +79,12 @@ endneg = single(0);
 %finaldroptri = 0.000001;
 finaldroptri = 0.002;
 %nanperwhtnoise  = 0.02;
-diffpercentcut = 1.5;
+diffpercentcut_orig = 0.2; %1.5; % this is the difference that it starts to drop at so bigger is more points dropped
+diffpercentcut = diffpercentcut_orig;
+diffpercentcut_update = 0.1;
+diffpercentcut_max = 0.9;
+nearfirst = 0;
+% this should vary with trace length
 
 if morecompress == 1
     tpgrad_orig = floor(intrlen/10);  % max number of scalars to store
@@ -108,6 +114,8 @@ elseif morecompress == 2
     %perwhtnoise = 0.06;
     scalepeak = double(126); % the max value to scale to
     smalldrop = 0.000000000001;
+    %diffpercentcut = floor(intrlen/600); %1.5; % this is the difference that it starts to drop at so bigger is more points dropped
+    % this should vary with trace length
 else
     tpgrad_orig = floor(intrlen/50);   % max number of scalars to store
     if tpgrad_orig < 20
@@ -177,6 +185,8 @@ tpgrad_origsm = tpgrad_orig - extrapoints;
 nanperwhtnoiseb = 0.0001;
 addback = 1;
 clipshift = 1.5;
+trim_datacj = trim_data;
+trim_data = trim_datacj*0;
 %
 %
 %
@@ -185,15 +195,15 @@ for ckk = 1:no_of_traces
     %fprintf('trace %d \n',ckk);
     % find if the trace has zreros on the start or end and then remove
     % those as no need to compress them with this scheme
-    if sum(trim_data(:,ckk)) ~= 0;
-        tracezeros = (trim_data(:,ckk) ~= 0).*origcountconst;
+    if sum(trim_datacj(:,ckk)) ~= 0;
+        tracezeros = (trim_datacj(:,ckk) ~= 0).*origcountconst;
         tracezerosout = tracezeros(tracezeros > 0);
         lastreal = tracezerosout(end);
         firstreal = tracezerosout(1);
         nooffzeros = firstreal - 1;
         nooflzeros = intrlen_orig - lastreal;
         noofrealsamps = (lastreal-firstreal)+1;
-        trim_data(1:noofrealsamps,ckk) = trim_data(firstreal:lastreal,ckk);
+        trim_data(1:noofrealsamps,ckk) = trim_datacj(firstreal:lastreal,ckk);
         
         %set the other items to work for the reduced trace length
         intrlen = noofrealsamps;
@@ -202,13 +212,14 @@ for ckk = 1:no_of_traces
         itpslocs = origcountconst(1:noofrealsamps);
         itpslocstest = origcountconst(1:noofrealsamps);
         origcount = origcountconst(1:noofrealsamps);
+        diffpercentcut = diffpercentcut_orig;
         %tmpupper = origcount(1:noofrealsamps);
         
         % reset some variables
         midpoints_red_t = midpoints_red_torg;
         points_all_blk = points_all_blk_org;
         tpgrad = tpgrad_origsm;
-        
+        nearfirst = 0;
         % find the first and second derivatives of the max
         max_1st_deriv = diff(trim_data(1:noofrealsamps,ckk));
         max_2nd_deriv = diff(trim_data(1:noofrealsamps,ckk),2);
@@ -343,7 +354,7 @@ for ckk = 1:no_of_traces
         [mitpslocsin, mitpsval] = dropsmalldiff(mitpslocsin,mitpsval,finaldroptri);
         
         
-        nl =8;
+        
         for envl = 1:nl
             %store orginal points to compare at the end
             origuprloc = itpslocsin;
@@ -364,10 +375,10 @@ for ckk = 1:no_of_traces
             %interpolate it back to the orginal grid density
             %posenv = double(makefastinterp1(double(itpslocsin),double(itpsval),double(origcount)));
             
-            if (morecompress > 2) % take another envelope of the envelope
-                % calc the envelope of the envelope
-                [itpslocsin, itpsval] = upr_envlop(itpsval, itpslocsin,firstpos, endpos, intrlen, origuprloc, origuprloc, origuprval, itpslocstest);
-            end
+            %             if (morecompress > 2) % take another envelope of the envelope
+            %                 % calc the envelope of the envelope
+            %                 [itpslocsin, itpsval] = upr_envlop(itpsval, itpslocsin,firstpos, endpos, intrlen, origuprloc, origuprloc, origuprval, itpslocstest);
+            %             end
             
             % add small white noise to avoid division errors/mess
             itpsval = itpsval + abs(itpsval.*nanperwhtnoise);
@@ -394,10 +405,10 @@ for ckk = 1:no_of_traces
             
             % need to stop this being manual, instead just keep making envelopes until the number of points is less than the number of storage points and then add in the higher priority points
             
-            if (morecompress > 2) % take another envelope of the envelope
-                % calc the envelope of the envelope
-                [mitpslocsin, mitpsval] = lwr_envlop(mitpsval, mitpslocsin,firstneg, endneg, intrlen, origlowloc, origlowloc, origlowval, itpslocstest);
-            end
+            %             if (morecompress > 2) % take another envelope of the envelope
+            %                 % calc the envelope of the envelope
+            %                 [mitpslocsin, mitpsval] = lwr_envlop(mitpsval, mitpslocsin,firstneg, endneg, intrlen, origlowloc, origlowloc, origlowval, itpslocstest);
+            %             end
             
             %was adding some white noise
             mitpsval = mitpsval - abs(mitpsval.*nanperwhtnoise);
@@ -451,9 +462,20 @@ for ckk = 1:no_of_traces
             % add in the missed off points from the orginal envelope, but only those which are positive inflection
             [mitpslocsin, mitpsval] = outsidetest(origlowloc,origlowval,mitpslocsin,mitpsval,origcount,1,nanperwhtnoise);
             
+            if envlplot == -1
+                figure(1102);
+                plot(itpslocsin,itpsval,'-or');
+                hold on;
+                plot(mitpslocsin, mitpsval,'-or');
+                %plot(updiflocs, updifval,'ob');
+                plot(trim_data(1:noofrealsamps,ckk),'-k')
+                plot(origuprloc,origuprval,'-g')
+                plot(origlowloc,origlowval,'-g')
+                hold off;
+            end
             
             %=========================================================================
-
+            
             
             % add in the missed off points from the orginal data, but only those which are positive inflection
             [mitpslocsin, mitpsval] = outsidetest_data(origcount,trim_data(1:noofrealsamps,ckk),mitpslocsin,mitpsval,origcount,1,(nanperwhtnoise*3));
@@ -461,25 +483,45 @@ for ckk = 1:no_of_traces
             % add in the missed off points from the orginal data, but only those which are positive inflection
             [itpslocsin, itpsval] = outsidetest_data(origcount,trim_data(1:noofrealsamps,ckk),itpslocsin,itpsval,origcount,0,(nanperwhtnoise*3));
             
-             %=========================================================================
-             if envlplot == -1
-                        figure(1101);
-                        plot(itpslocsin,itpsval,'-or');
-                        hold on;
-                        plot(mitpslocsin, mitpsval,'-or');
-                        %plot(updiflocs, updifval,'ob');
-                        plot(trim_data(1:noofrealsamps,ckk),'-k')
-                        plot(origuprloc,origuprval,'-g')
-                        plot(origlowloc,origlowval,'-g')
-                        hold off;
-            end            
+            %=========================================================================
+            if envlplot == -1
+                figure(1101);
+                plot(itpslocsin,itpsval,'-or');
+                hold on;
+                plot(mitpslocsin, mitpsval,'-or');
+                %plot(updiflocs, updifval,'ob');
+                plot(trim_data(1:noofrealsamps,ckk),'-k')
+                plot(origuprloc,origuprval,'-g')
+                plot(origlowloc,origlowval,'-g')
+                hold off;
+            end
             
             %=========================================================================
             
             % decide if time to exit the loop
             if (size(mitpslocsin,1) + size(itpslocsin,1)) < floor(tpgrad);
+                fprintf('under limit no of points %d ; no of points used %d\n',floor(tpgrad),(size(mitpslocsin,1) + size(itpslocsin,1)));
                 break
+            elseif  (size(mitpslocsin,1) + size(itpslocsin,1)) < floor(tpgrad)*1.3;
+                if nearfirst == 1
+                    diffpercentcut = diffpercentcut_orig;
+                    nearfirst = 0;
+                else
+                    diffpercentcut = diffpercentcut + diffpercentcut_update;
+                end
+                if diffpercentcut > diffpercentcut_max
+                    diffpercentcut = diffpercentcut_max;
+                end
+                %fprintf('near limit no of points; diffcut %f ; no of points used %d\n',diffpercentcut,(size(mitpslocsin,1) + size(itpslocsin,1)));
+            else
+                %fprintf('limit no of points %d ; no of points used %d\n',floor(tpgrad),(size(mitpslocsin,1) + size(itpslocsin,1)));
+                diffpercentcut = diffpercentcut + diffpercentcut_update;
+                if diffpercentcut > diffpercentcut_max
+                    diffpercentcut = diffpercentcut_max;
+                end
+                nearfirst = 1;
             end
+            
         end
         
         
@@ -946,10 +988,10 @@ end
         else % lower envelope
             dtmpupper = florigcountb;
             dtmpupper(tnewlocs) = tnewvals;
-%             figure(3001);
-%             plot(toriglocs, torigvals,'-or');
-%             hold on;
-%             plot(toriglocs, newinterp(toriglocs),'ob');
+            %             figure(3001);
+            %             plot(toriglocs, torigvals,'-or');
+            %             hold on;
+            %             plot(toriglocs, newinterp(toriglocs),'ob');
             dtmpupper(toriglocs(( [diff(([-1;diff(torigvals,1)]./[-1;diff(toriglocs,1)]),1);-1] > 0) & (newinterp(toriglocs) > torigvals))) = torigvals(( [diff(([-1;diff(torigvals,1)]./[-1;diff(toriglocs,1)]),1);-1] > 0) & (newinterp(toriglocs) > torigvals))-abs((torigvals(( [diff(([-1;diff(torigvals,1)]./[-1;diff(toriglocs,1)]),1);-1] > 0) & (newinterp(toriglocs) > torigvals)).*whitemul));
             toriglocs = florigcountb(dtmpupper ~= florigcountb);
             torigvals = dtmpupper(dtmpupper ~= florigcountb);
