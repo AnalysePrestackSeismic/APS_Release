@@ -79,9 +79,9 @@ endneg = single(0);
 %finaldroptri = 0.000001;
 finaldroptri = 0.002;
 %nanperwhtnoise  = 0.02;
-diffpercentcut_orig = 0.2; %1.5; % this is the difference that it starts to drop at so bigger is more points dropped
+diffpercentcut_orig =0.00001; %1.5; % this is the difference that it starts to drop at so bigger is more points dropped
 diffpercentcut = diffpercentcut_orig;
-diffpercentcut_update = 0.1;
+diffpercentcut_update = 0.02;
 diffpercentcut_max = 1.4;
 nearfirst = 0;
 % this should vary with trace length
