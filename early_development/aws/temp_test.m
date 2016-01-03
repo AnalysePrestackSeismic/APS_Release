@@ -37,7 +37,7 @@ creden = textscan(fileID, formatSpec, 'Delimiter', delimiter,  'ReturnOnError', 
 fclose(fileID);
 
 %% Use JAVA Class to create AWS credentials class
-awscred = BasicAWSCredentials(creden{1,2}(1,1),creden{1,2}(2,1));
+awscred = BasicAWSCredentials(aws_access_key_id,);
 
 s3 = AmazonS3Client(awscred);
 s3.setEndpoint('s3-eu-west-1.amazonaws.com');
@@ -99,6 +99,18 @@ byteArray = IOUtils.toByteArray(object.getObjectContent());
 y_down = reshape(typecast(byteArray,'single'),orig_rows,orig_cols);
 figure(1)
 subplot(2,1,2); imagesc(y_down);
+
+% AmazonS3 s3Client = new AmazonS3Client(new ProfileCredentialsProvider());        
+% 
+% GetObjectRequest rangeObjectRequest = new GetObjectRequest(
+% 		bucketName, key);
+% rangeObjectRequest.setRange(0, 10); // retrieve 1st 11 bytes.
+% S3Object objectPortion = s3Client.getObject(rangeObjectRequest);
+% 
+% InputStream objectData = objectPortion.getObjectContent();
+% // Process the objectData stream.
+% objectData.close();
+
 %% Delete object then bucket
 % s3.deleteObject(DeleteObjectRequest(bucketName, key));	
 % s3.deleteBucket(bucketName);

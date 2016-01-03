@@ -53,6 +53,13 @@ function job_meta_path = segy_make_job(filepath,filename_string,il_byte,xl_byte,
 %-------------------PROCESSING FUNCTION ARGUMENTS--------------------------
 % Column numbers define output format of .mat_lite file. 
 % Should make this a global format definition.  
+
+%% Create AWS S3 Bucket for this survey
+credentials_path = '/bgdata/git/APS_Release/early_development/aws/creden.txt';
+bucketName = [num2str(randi(100000)),'survey'];
+[s3_java_obj,bucketName] = create_bucket(credentials_path,bucketName);
+
+%%
 pkey_loc = 1;                               % column numbers needs to be implemented Primary Key
 skey_loc = 2;                               % Secondary Key
 byte_loc = 3;                               % Byte location
