@@ -26,8 +26,8 @@ s3.setEndpoint('s3-eu-west-1.amazonaws.com');
 
 %% Create Object
 object_meta.orig_type = 'single';
-object_data = typecast(object_data,object_meta.orig_type); % convert to single so that we always know the original type
-
+%object_data = typecast(object_data,object_meta.orig_type); % convert to single so that we always know the original type
+object_data = single(object_data);
 [object_meta.orig_rows,object_meta.orig_cols] = size(object_data); % could store these alongside or in array?
 % convert to signed int8 for use with ByteArray*
 object_data = typecast(object_data(:),'int8');

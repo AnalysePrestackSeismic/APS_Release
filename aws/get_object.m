@@ -30,9 +30,13 @@ if size(range,2) == 2
     if range(1) < 0 || range(2) < 0
         fprintf('Range cannot have negative values.\n');
         byteArray = NaN;
+        padded.start = NaN;
+        padded.end = NaN;
     elseif range(1)/4 ~= floor(range(1)/4) || range(2)/4 ~= floor(range(2)/4)
         fprintf('Ranges are not divisible by 4\n');
         byteArray = NaN;
+        padded.start = NaN;
+        padded.end = NaN;
     else
         % Get object
         object_request = GetObjectRequest(bucketName,key);
@@ -43,10 +47,10 @@ if size(range,2) == 2
             if range_request/4 == floor(range_request/4);
                 object_request.setRange(range(1),range(2));
             else
-                fprintf('Error the range request is not correct for conversion from int8 to single\n');
+                fprintf('Error the range request is not correct for conversion from int8 to single.\n');
                 floor_range = rem(range_request,4);
                 range(2) = range(2)-floor_range;
-                fprintf('Flooring to nearest element %i\n',range(2));
+                fprintf('Flooring to nearest element %i.\n',range(2));
                 object_request.setRange(range(1),range(2));
             end
         end
@@ -79,8 +83,8 @@ if size(range,2) == 2
         
         if size(byteArray,1) == meta.orig_rows*meta.orig_cols
             byteArray = reshape(byteArray,meta.orig_rows,meta.orig_cols);
-            padded.start = NaN;
-            padded.end = NaN;
+            padded.start = 0;
+            padded.end = 0;
         else
             fprintf('Restricted range request. Padding with NaNs to whole number of rows.\n')
             % Limit length of ByteArray to complete rows, since this will
@@ -98,6 +102,8 @@ if size(range,2) == 2
 elseif size(range,2) ~= 2
     fprintf('Range should be 1x2 matrix, start byte | end byte.\n');
     byteArray = NaN;
+    padded.start = NaN;
+    padded.end = NaN;
 end
 
 end
