@@ -73,8 +73,7 @@ if size(range,2) == 2
         meta.orig_type = cell2mat(meta_array(find(~cellfun('isempty',strfind(meta_array,'orig-type'))),2));
         meta.orig_rows = str2double(cell2mat(meta_array(find(~cellfun('isempty',strfind(meta_array,'orig-rows'))),2)));
         meta.orig_cols = str2double(cell2mat(meta_array(find(~cellfun('isempty',strfind(meta_array,'orig-cols'))),2)));
-        meta.type_length = str2double(cell2mat(meta_array(find(~cellfun('isempty',strfind(meta_array,'type-length'))),2)));
-        
+
         % Get Object
         byteArray = IOUtils.toByteArray(object.getObjectContent());
         

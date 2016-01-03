@@ -39,7 +39,8 @@ meta.setContentLength(object_meta.typecast_length);
 meta.addUserMetadata('orig-type',object_meta.orig_type);
 meta.addUserMetadata('orig-rows',num2str(object_meta.orig_rows));
 meta.addUserMetadata('orig-cols',num2str(object_meta.orig_cols));
-meta.addUserMetadata('type-length',num2str(object_meta.typecast_length));
+% meta.addUserMetadata('type-length',num2str(object_meta.typecast_length));
+% could add primary, secondary, tertiary and sample keys
 
 object_data_ByteArray = ByteArrayInputStream(object_data);
 s3.putObject(PutObjectRequest(bucketName, key, object_data_ByteArray, meta));
