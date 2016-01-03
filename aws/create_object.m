@@ -25,8 +25,8 @@ s3 = AmazonS3Client(awscred);
 s3.setEndpoint('s3-eu-west-1.amazonaws.com');
 
 %% Create Object
-object_data = single(object_data); % convert to single so that we always know the original type
-object_meta.original_type = 'single';
+object_meta.orig_type = 'single';
+object_data = typecast(object_data,object_meta.orig_type); % convert to single so that we always know the original type
 
 [object_meta.orig_rows,object_meta.orig_cols] = size(object_data); % could store these alongside or in array?
 % convert to signed int8 for use with ByteArray*
@@ -36,7 +36,7 @@ object_meta.typecast_length = length(object_data);
 % Set object meta data
 meta = ObjectMetadata();
 meta.setContentLength(object_meta.typecast_length);
-meta.addUserMetadata('orig-type','single');
+meta.addUserMetadata('orig-type',object_meta.orig_type);
 meta.addUserMetadata('orig-rows',num2str(object_meta.orig_rows));
 meta.addUserMetadata('orig-cols',num2str(object_meta.orig_cols));
 meta.addUserMetadata('type-length',num2str(object_meta.typecast_length));

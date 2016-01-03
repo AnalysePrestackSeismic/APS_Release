@@ -1,6 +1,10 @@
 function [aws_id,aws_key] = get_credentials(credentials_path)
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
+% File formatted like
+%aws_access_key_id=XXXXXXXXXXXXXXXXXXX
+%aws_secret_access_key=XXXXXXXXXXXXXXXXXXX
+
 %% Load AWS Credentials
 fileID = fopen(credentials_path);
 delimiter = '=';
