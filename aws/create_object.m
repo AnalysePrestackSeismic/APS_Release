@@ -36,6 +36,7 @@ object_meta.typecast_length = length(object_data);
 % Set object meta data
 meta = ObjectMetadata();
 meta.setContentLength(object_meta.typecast_length);
+meta.AES_256_SERVER_SIDE_ENCRYPTION;
 meta.addUserMetadata('orig-type',object_meta.orig_type);
 meta.addUserMetadata('orig-rows',num2str(object_meta.orig_rows));
 meta.addUserMetadata('orig-cols',num2str(object_meta.orig_cols));

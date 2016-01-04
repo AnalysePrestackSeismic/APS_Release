@@ -8,11 +8,11 @@ subplot(2,1,1); imagesc(data_up);
 
 %%
 credentials_path = '/bgdata/git/APS_Release/early_development/aws/creden.txt';
-bucketName = '011968-jamess-test';
+bucketName = '011968-jscj-test';
 [bucketName] = create_bucket(credentials_path,bucketName);
 
 %%
-key = 'selvage/1-vol_orig.segy';
+key = 'selvage/2-vol_orig.segy';
 [obj_meta] = create_object(credentials_path,bucketName,key,data_up);
 
 %%

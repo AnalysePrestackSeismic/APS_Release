@@ -13,7 +13,6 @@ import com.amazonaws.util.*;
 %% Use JAVA Class to create AWS credentials class
 [aws_id,aws_key] = get_credentials(credentials_path);
 awscred = BasicAWSCredentials(aws_id,aws_key);
-
 s3 = AmazonS3Client(awscred);
 s3.setEndpoint('s3-eu-west-1.amazonaws.com');
 
