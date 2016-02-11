@@ -1,10 +1,44 @@
 function [ freq_attr ]= avg_freq_attribute_calc (job_meta_path,st_vol,end_vol,blk,plot_pic,Z_diff,Qmax,power_cut_perc)
+%% ------------------ Disclaimer  ------------------
+% 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) makes no representation or warranty, express or implied, in 
+% respect to the quality, accuracy or usefulness of this repository. The code
+% is this repository is supplied with the explicit understanding and 
+% agreement of recipient that any action taken or expenditure made by 
+% recipient based on its examination, evaluation, interpretation or use is 
+% at its own risk and responsibility.
+% 
+% No representation or warranty, express or implied, is or will be made in 
+% relation to the accuracy or completeness of the information in this 
+% repository and no responsibility or liability is or will be accepted by 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) in relation to it.
+%% ------------------ License  ------------------ 
+% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+%% github
+% https://github.com/AnalysePrestackSeismic/
+%% ------------------ FUNCTION DEFINITION ---------------------------------
 %% Function to Calculate Frequency Attributes and  a Q function based on Spectrums estimated in Wavelet Estimation
-% This function calculates frequency based attributes from the estimated
+% This function calculates frequency based attributes like Q and bandwidth from the estimated
 % wavelets from Wavelet Estimation Algorithm
 % Inputs:
+%     job_meta_path = path to job meta fine
+%     st_vol = start volume
+%     end_vol = end volume
+%     blk = block number
+%     plot_pic = 1 to plot pic, 0 not to
+%     Z_diff = % Rough desirabelDifference in the windows in z (time in s and depth in km)
+%     Qmax = % Maximum tolerated Q (This is not a hard threshold, its used for the Qestimation as a loose boundary
+%     power_cut_perc = % Fraction of maximum power (db)to find initial high and low boundaries on frequency scale
+
 % Outputs:
+%   freq_attr = structure containing frequency attributes
+
 % Write to Disk:
+%   freq_attr_Mat = fatfile to store depth trend of frequency attributes
 
 %% ##############################################################################################################################################################
 %-----Parameters------------
@@ -14,7 +48,7 @@ function [ freq_attr ]= avg_freq_attribute_calc (job_meta_path,st_vol,end_vol,bl
 filt_len1=3;                                                                % Length of Smoothening Filter on Z axis in samples (used on wavelet matrix)
 filt_len2=5;                                                                % Length of Smoothening Filter on frequency axis in samples (used on wavelet matrix)
 
-Power_cut=power_cut_perc/100;                                                              % Fraction of maximum power (db)to find initial high and low boundaries on frequency scale
+Power_cut=power_cut_perc/100;                                               % Fraction of maximum power (db) to find initial high and low boundaries on frequency scale
 
 % This can be implemented by a smarter method using differential of the
 % amplitude spectrum and looking for the point where it approaches zero
@@ -42,8 +76,8 @@ if mod(n_diff,2)==1
 end
 
 
-Z_diff2=n_diff*length_window/1000;                          % Recalculated  Z_diff based of integer number of translations
-n_vol= min(n_vol,abs(end_vol - st_vol));                    % Limiting number of volumes to user's specifications
+Z_diff2=n_diff*length_window/1000;                          % Recalcule  Z_diff based of integer number of translations
+n_vol= min(n_vol,abs(end_vol - st_vol));                    % Limit number of volumes to user's specifications
 
 if exist(strcat(job_meta.wav_directory,'Frequency_Attributes/'),'dir') == 0
     mkdir(strcat(job_meta.wav_directory,'Frequency_Attributes/'))
@@ -215,7 +249,7 @@ for i=(n_diff+1):n_win
         S_decay(i) = p2(1);                                                 % The slope term in the linear regresssion fit
         C_decay(i) = p2(2);                                                 % The intercept term in the linear regresssion fit
         %MUF(i-n_diff/2)=max(freq_axis3);                                    % The maximum usable frequency
-        MUF(i)=max(freq_axis3);                                    % The maximum usable frequency
+        MUF(i)=max(freq_axis3);                                             % The maximum usable frequency
     else
         Dp(i-n_diff/2)=Dp(i-n_diff/2-1);                                    % If there's all points are rejected (The first point is accepted by default. Assign the previous Dp.
         S_decay(i)= S_decay(i-1);
@@ -235,7 +269,7 @@ end
 % Calculate Q, This value is thenis aligned to the sample in the middle of the compared Z windows
 Dp(1:n_diff/2)= Dp(n_diff/2+1);                                             % Extrapolate for initial values
 Q(1:n_diff/2)=Q(n_diff/2+1);                                                % Extrapolate for initial values
-MUF(1:n_diff)=MUF(n_diff+1);                                            % Extrapolate for initial values
+MUF(1:n_diff)=MUF(n_diff+1);                                                % Extrapolate for initial values
 Q((n_win-n_diff/2):n_win)=Q(n_win-n_diff/2-1);                              % Extrapolate for final values
 Dp((n_win-n_diff/2):n_win)=Dp(n_win-n_diff/2-1);                            % Extrapolate for final values
 MUF((n_win-n_diff/2):n_win)=MUF(n_win-n_diff/2-1);                            % Extrapolate for final values
@@ -370,6 +404,7 @@ fprintf(fid_wav, '%s%g\n','Central Xline : ',xl_central);
 
 fclose(fid_wav);
 dlmwrite(file_str,freq_attr_Mat,'delimiter', '\t','precision', '%4.0f' ,'-append');
+dips(file_str);
 
 end
 

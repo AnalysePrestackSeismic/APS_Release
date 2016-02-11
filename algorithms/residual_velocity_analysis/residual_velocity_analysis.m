@@ -1,32 +1,130 @@
-function [] = residual_velocity_analysis( gather_meta_path,i_block,outdir,apply_nmo_switch)
+function [] = residual_velocity_analysis( gather_meta_path,i_block,outdir,vel_meta_path,varargin)
+%% ------------------ Disclaimer  ------------------
+% 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) makes no representation or warranty, express or implied, in 
+% respect to the quality, accuracy or usefulness of this repository. The code
+% is this repository is supplied with the explicit understanding and 
+% agreement of recipient that any action taken or expenditure made by 
+% recipient based on its examination, evaluation, interpretation or use is 
+% at its own risk and responsibility.
+% 
+% No representation or warranty, express or implied, is or will be made in 
+% relation to the accuracy or completeness of the information in this 
+% repository and no responsibility or liability is or will be accepted by 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) in relation to it.
+%% ------------------ License  ------------------ 
+% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+%% github
+% https://github.com/AnalysePrestackSeismic/
+%% ------------------ FUNCTION DEFINITION ---------------------------------
 
 % Automatic residual velocity analysis
 %   
-% Inverts residual time errors on NMO corrected gathers to give updated
+% Picks residual time errors on NMO corrected gathers to give updated
 % velocity field
 %
 % gather_meta_path:     pathname to .mat file for the gathers
 % i_block:              block number to analyse
 % outdir:               directory for output files
-% apply_nmo_switch:     should be set to 1 if need to apply nmo, otherwise 0           
+% vel_meta:             path to velocity meta file
+%                       note vels must be on same il,xl grid as gathers
+%
+% Optional parameters:
+%
+% nmo=                  should be set to 1 if input gathers do not have nmo
+%                       applied (default 0)
+% gap=                  min gap between picks (number of samples) 
+%                       (default 4)
+% itm=                  inner trace mute (degrees) (default 0)
+% otm=                  outer trace mute (degrees) (default 30)
+% min_fold=             minimum number of near offset traces to keep live
+%                       (default 5)
+% threshold=            minimum cross-correlation value for picks (0 - 1)
+%                       (default 0.9)
+% start=                horizon at which to start analysis 
+%                       (default start at zero)
+% stop=                 horizon at which to stop analysis
+%                       (should be added with add_horizon_to_job_meta)
+%                       (default end at end of trace)
 %
 % velocity field should be sampled on same x,y grid as gathers but can be
 % decimated in t
 %
+% all optional parameters can be left to default to get a reasonable result
+% but adding start and stop horizons can greatly reduce runtime
 
 % to reduce printout in compilied version turned all warning off
 warning off all;
-apply_nmo_switch = str2double(apply_nmo_switch);
 
-% ============================================================================================================
-% hardwired parameters
-
-stack_itm = 5;
-stack_otm = 80;
-pick_otm = 70;
-
-% num_iter=5;
-% smth_size=9;
+% Defaults for arguments =================================================
+apply_nmo_switch = 0;
+gap = 4;
+itm = 0;
+otm = 30;
+min_fold = 5;
+threshold = 0.9;
+use_start_horz = 0;
+start_horz = 'zero';
+use_stop_horz = 0;
+stop_horz = 'eot';
+i_block = str2num(i_block);
+%=========================================================================
+%
+for kv = 1:length(varargin)
+    varknown = false;
+    if strfind(varargin{kv},'nmo=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        apply_nmo_switch = str2double(vartmp(2));
+        varknown = true;
+    end
+    if strfind(varargin{kv},'gap=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        gap = str2double(vartmp(2));
+        varknown = true;
+    end
+    if strfind(varargin{kv},'itm=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        itm = str2double(vartmp(2));
+        varknown = true;
+    end
+    if strfind(varargin{kv},'otm=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        otm = str2double(vartmp(2));
+        varknown = true;
+    end
+    if strfind(varargin{kv},'min_fold=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        min_fold = str2double(vartmp(2));
+        varknown = true;
+    end
+    if strfind(varargin{kv},'threshold=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        threshold = str2double(vartmp(2));
+        varknown = true;
+    end
+    if strfind(varargin{kv},'start=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        use_start_horz = 1;
+        start_horz = vartmp{2};
+        varknown = true;
+    end
+    if strfind(varargin{kv},'stop=')
+        vartmp = deblank(regexp(varargin{kv},'=','split'));
+        use_stop_horz = 1;
+        stop_horz = vartmp{2};
+        varknown = true;
+    end
+    
+    % last test to see if there was a command line variable that was not
+    % expected in which case throw warning and crash
+    if varknown == false;
+        error('unknown input variable; the variable %s is not recognised and the function has quit\n', varargin{kv});
+    end
+end
 
 
 % ============================================================================================================
@@ -35,131 +133,226 @@ pick_otm = 70;
 %
 
 gather_meta = load(gather_meta_path);
+vel_meta = load(vel_meta_path);
 
-% make a single velocity trace for testing with (average t/s dip profile)
+min_il = gather_meta.block_keys(i_block,1);
+max_il = gather_meta.block_keys(i_block,2);
+min_xl = gather_meta.block_keys(i_block,3);
+max_xl = gather_meta.block_keys(i_block,4);
 
+il_inc = double(gather_meta.pkey_inc);
+xl_inc = double(gather_meta.skey_inc);
 
-% veltrace = interp1([0 132 264 396 529 663 797 1068 1607 2676 3341 4005 4667 5330 5992 6654],...
-%     [1525 1520 1517 1515 1512 1509 1505 1499 1493 1495 1497 1498 1500 1501 1502 1503],100:100:5000);
+num_ils = 1 + (max_il-min_il)/il_inc;
+num_xls = 1 + (max_xl-min_xl)/xl_inc;
 
-% make a single velocity trace for testing with (constant 1500 m/s)
+% do some basic checks
 
-veltrace = interp1([0 6000],[1500 1500],100:100:5000);
+error_flag = 0;
+error_str = '';
+if vel_meta.pkey_min > min_il
+    error_str = ['Velocity volume first inline (',num2str(vel_meta.pkey_min),') greater than first inline for block ',num2str(i_block),' (',num2str(min_il),')'];
+    error_flag = 1;
+end
+if vel_meta.pkey_max < max_il
+    error_str = [error_str,'Velocity volume last inline (',num2str(vel_meta.pkey_max),') less than last inline for block ',num2str(i_block),' (',num2str(max_il),')'];
+    error_flag = 1;
+end
+if vel_meta.skey_min > min_xl
+    error_str = [error_str,'Velocity volume first xline (',num2str(vel_meta.skey_min),') greater than first xline for block ',num2str(i_block),' (',num2str(min_xl),')'];
+    error_flag = 1;
+end
+if vel_meta.skey_max < max_xl
+    error_str = [error_str,'Velocity volume last xline (',num2str(vel_meta.skey_max),') less than last xline for block ',num2str(i_block),' (',num2str(max_xl),')'];
+    error_flag = 1;
+end
+if vel_meta.pkey_inc ~= il_inc
+    error_str = [error_str,'Velocity volume inline increment (',num2str(vel_meta.pkey_inc),') not equal to gather inline increment ' (',num2str(il_inc),')'];
+    error_flag = 1;
+end
+if vel_meta.skey_inc ~= xl_inc
+    error_str = [error_str,'Velocity volume xline increment (',num2str(vel_meta.skey_inc),') not equal to gather xline increment ' (',num2str(xl_inc),')'];
+    error_flag = 1;
+end
 
-veltimes = ([100:100:5000]')./1000;
+if error_flag
+    error(error_str);
+end
 
-veltrace = veltrace';
+% ============================================================================================================
 
-
-% velocity_meta = load(velocity_meta);
-
-% read the gathers and velocities in from segy
+% read the gathers 
 
 % trace data is ordered by cdp, offset, sample
 
 % incoming trace data is one stream of traces for efficiency
 % so reshape it into a 3 dimensional array for processing
 
-[seismic, traces{3,2}, traces{1,2}{1,1}, offsets] = node_segy_read(gather_meta_path,'1',i_block);
-
+[seismic, traces, traces_ilxl, offsets] = node_segy_read(gather_meta_path,'1',num2str(i_block));
 
 seismic.fold = max(seismic.trace_ilxl_bytes(:,7));
-traces{3,2} = reshape(traces{3,2},size(traces{3,2},1),seismic.fold,[]);
 
-% [velocity, vel_traces{3,2}, vel_traces{1,2}{1,1},~] = node_segy_read(velocity_meta_path,'0',i_block)
+traces = reshape(traces,size(traces,1),seismic.fold,[]);
 
-seismic.n_gathers = size(traces{3,2},3);
+seismic.n_gathers = size(traces,3);
 % check to make sure it read something if not exit
 
-veltrace = repmat(veltrace,1,seismic.n_gathers);
-veltimes = repmat(veltimes,1,seismic.n_gathers);
-
-
-if isempty(traces{3,2}) == 1 &&  isempty(traces{1,2}{1,1}) == 1 && isempty(offsets) == 1
+if isempty(traces) == 1 &&  isempty(traces_ilxl) == 1 && isempty(offsets) == 1
     return
 end
-%if isempty(vel_traces{3,2}) == 1 &&  isempty(vel_traces{1,2}{1,1}) == 1 
-%    return
-%end
+
+gather_ilxl = unique(traces_ilxl,'rows');
+
+offsets = reshape(offsets,seismic.fold,[]);
 
 % ============================================================================================================
+%
+% read the velocity volume
+%
+% find the blocks to read
+counter=0;
+num_vel_trc = 0;
 
-% set up meta data for output
-
-% add the history of jobs run and this one to the current ebcdic
-
-ebdichdr = [strcat('residual velocity analysis ',date)];
-if isfield(gather_meta,'comm_history')
-    prev_ebcdic = gather_meta.comm_history;
-    new_ebcdic = prev_ebcdic{size(prev_ebcdic,1),2};
-else
-    prev_ebcdic{1,2} = '';
-    new_ebcdic = '';
+for bb=1:length(vel_meta.liveblocks);
+    vel_blk=vel_meta.liveblocks(bb);
+    vel_min_il=vel_meta.block_keys(vel_blk,1);
+    vel_max_il=vel_meta.block_keys(vel_blk,2);
+    vel_min_xl=vel_meta.block_keys(vel_blk,3);
+    vel_max_xl=vel_meta.block_keys(vel_blk,4);
+    vel_il_corners = [vel_min_il,vel_min_il,vel_max_il,vel_max_il];
+    vel_xl_corners = [vel_min_xl,vel_max_xl,vel_max_xl,vel_min_xl];
+    in_block = inpolygon(vel_il_corners,vel_xl_corners,[min_il,min_il,max_il,max_il],[min_xl,max_xl,max_xl,min_xl]);
+    if sum(in_block)>0
+        counter=counter+1;
+       live_velblocks(counter)=vel_blk;     
+    end
 end
 
-for ebcii = (size(prev_ebcdic,1)-1):-1:1
-    tmpebcc = regexp(prev_ebcdic{ebcii,2},'/','split');
-    new_ebcdic = [new_ebcdic tmpebcc{1}  tmpebcc{end}];
-end
-new_ebcdic = sprintf('%-3200.3200s',new_ebcdic);
-clear tmpebcc prev_ebcdic;
+num_veltraces = 0;
 
-
-% for the pre-stack dataset
-traces{1,1} = 'Meta data for output files';
-%traces{resultno,2}{1,1} = ilxl_read;
-traces{1,2}{2,1} = offsets;
-ebcstrtowrite = sprintf('%-3200.3200s',[traces{1,1} '  ' ebdichdr '  ' new_ebcdic]);
-traces{1,1} = ebcstrtowrite;
-traces{1,3} = 'is_gather'; % 1 is yes, 0 is no
-
-
-% for the stack output
-stack_traces{1,1} = 'Meta data for output files';
-stack_traces{1,2}{1,1} = traces{1,2}{1,1}(1:seismic.fold:end,:);
-stack_traces{1,2}{2,1} = uint32(zeros(seismic.n_gathers,1));
-%ebcstrtowrite = sprintf('%-3200.3200s',[traces{resultno,1} '  ' ebdichdr '  ' tmpebc]);
-stack_traces{1,1} = ebcstrtowrite;
-stack_traces{1,3} = 'is_gather'; % 1 is yes, 0 is no
-
-output_dir = [gather_meta.output_dir,'trimout/'];
-% check to see if the directory exists
-if exist(output_dir,'dir') == 0
-    mkdir(output_dir);
+for bb=1:counter
+    [velstr, veltrace_blk, veltrace_ilxl_blk, ~] = node_segy_read(vel_meta_path,'1',num2str(live_velblocks(bb)));
+    
+    keep_idx = ismember(veltrace_ilxl_blk,gather_ilxl,'rows');
+    veltrace_keep(:,num_veltraces+1:num_veltraces+sum(keep_idx)) = veltrace_blk(:,keep_idx);
+    veltrace_ilxl_keep(num_veltraces+1:num_veltraces+sum(keep_idx),:) = veltrace_ilxl_blk(keep_idx,:);
+    num_veltraces = num_veltraces + sum(keep_idx);
 end
 
+% gathers will always be in inline/xline order. So if we sort vels to
+% inline/xline order then they should be in same order
 
-% prestack output
-filename = 'gaths';
-%traces{2,1} = strcat(filename,'_trim_shifts_',num2str(startvol),'-',num2str(endvol),'_',num2str(zsmooth));
-traces{2,1} = strcat(filename,'_trim_shifts');
-traces{3,1} = strcat(filename,'_nmo_data');
-traces{2,3} = 1;
-traces{3,3} = 1;
-traces{2,2} = zeros(size(traces{3,2}),'single');
+[~,veltrace_sort_idx] = sort(veltrace_ilxl_keep(:,1).*100000+veltrace_ilxl_keep(:,2));
+veltrace = veltrace_keep(:,veltrace_sort_idx);
+
+if veltrace_ilxl_keep(veltrace_sort_idx,1:2) ~= gather_ilxl
+    error('Some gather locations do not have a corresponding velocity trace. Exiting');
+end
+
+clear veltrace_blk veltrace_keep veltrace_ilxl_blk veltrace_ilxl_keep il_idx xl_idx keep_idx
+
+veltimes = 0.001*((velstr.s_rate/1000):(velstr.s_rate/1000):(velstr.s_rate/1000)*velstr.n_samples)';
 
 
-% stack result
-filename2 = 'stack';
-stack_traces{2,1} = strcat(filename2,'_input');
-stack_traces{2,2} = zeros(seismic.n_samples,seismic.n_gathers,'single');
-stack_traces{3,1} = strcat(filename2,'_output');
-stack_traces{3,2} = zeros(seismic.n_samples,seismic.n_gathers,'single');
-%stack_traces{4,1} = strcat(filename2,'_posttrim_no_resid_',num2str(startvol),'-',num2str(endvol),'_',num2str(zsmooth));
-stack_traces{4,1} = strcat(filename2,'_velocity');
-stack_traces{4,2} = zeros(seismic.n_samples,seismic.n_gathers,'single');
-stack_traces{2,3} = 0;
-stack_traces{3,3} = 0;
-stack_traces{4,3} = 0;
+% ============================================================================================================
+% load start and stop horizons
+
+% initialise start and stop times
+horz_times = zeros(num_ils*num_xls,2);
+horz_times(:,1) = seismic.s_rate/1000;
+horz_times(:,2) = seismic.n_samples*seismic.s_rate/1000;
+
+% read in horizon and put on same grid as gathers
+
+if use_start_horz
+    horz_in = dlmread(gather_meta.(start_horz));
+    keep_idx = ismember(horz_in(:,1:2),gather_ilxl,'rows'); % find inline/xline pairs that match the gathers
+    il_idx = (horz_in(keep_idx,1) - min_il)/il_inc;
+    xl_idx = 1 + (horz_in(keep_idx,2) - min_xl)/xl_inc;
+    ilxl_idx = il_idx * num_xls + xl_idx;
+    horz_times(ilxl_idx,1) = horz_in(keep_idx,3);
+%     [~,horz_sort_idx] = sort(horz_in(keep_idx,1).*100000+horz_in(keep_idx,2)); % sort to inline/xline
+%     horz_times(:,1) = horz_times(horz_sort_idx,1);
+    if horz_in(keep_idx,1:2) ~= gather_ilxl
+        disp(['Warning: ',num2str(seismic.n_gathers-sum(keep_idx)),' gather location(s) do not have a horizon pick for ',start_horz]);
+    end
+end
+
+clear horz_in keep_idx horz_keep il_idx xl_idx ilxl_idx horz_sort_idx;
+
+if use_stop_horz
+    horz_in = dlmread(gather_meta.(stop_horz));
+    keep_idx = ismember(horz_in(:,1:2),gather_ilxl,'rows'); % find inline/xline pairs that match the gathers
+    il_idx = (horz_in(keep_idx,1) - min_il)/il_inc;
+    xl_idx = 1 + (horz_in(keep_idx,2) - min_xl)/xl_inc;
+    ilxl_idx = il_idx * num_xls + xl_idx;
+    horz_times(ilxl_idx,2) = horz_in(keep_idx,3);
+%    [~,horz_sort_idx] = sort(horz_in(keep_idx,1).*100000+horz_in(keep_idx,2)); % sort to inline/xline
+%    horz_times(:,1) = horz_times(horz_sort_idx,1);
+    if seismic.n_gathers-sum(keep_idx) > 0
+        disp(['Warning: ',num2str(seismic.n_gathers-sum(keep_idx)),' gather location(s) do not have a horizon pick for ',stop_horz]);
+    end
+end
+
+clear horz_in keep_idx horz_keep il_idx xl_idx ilxl_idx horz_sort_idx;
+
+% % ============================================================================================================
+% 
+% % set up meta data for output
+% 
+% % add the history of jobs run and this one to the current ebcdic
+% 
+% ebdichdr = [strcat('residual velocity analysis ',date)];
+% if isfield(gather_meta,'comm_history')
+%     prev_ebcdic = gather_meta.comm_history;
+%     new_ebcdic = prev_ebcdic{size(prev_ebcdic,1),2};
+% else
+%     prev_ebcdic{1,2} = '';
+%     new_ebcdic = '';
+% end
+% 
+% for ebcii = (size(prev_ebcdic,1)-1):-1:1
+%     tmpebcc = regexp(prev_ebcdic{ebcii,2},'/','split');
+%     new_ebcdic = [new_ebcdic tmpebcc{1}  tmpebcc{end}];
+% end
+% new_ebcdic = sprintf('%-3200.3200s',new_ebcdic);
+% clear tmpebcc prev_ebcdic;
+% 
+% % for the stack output
+% stack_traces{1,1} = 'Meta data for output files';
+% stack_traces{1,2}{1,1} = traces_ilxl(1:seismic.fold:end,:);
+% stack_traces{1,2}{2,1} = uint32(zeros(seismic.n_gathers,1));
+% %ebcstrtowrite = sprintf('%-3200.3200s',[traces{resultno,1} '  ' ebdichdr '  ' tmpebc]);
+% stack_traces{1,1} = ebcstrtowrite;
+% stack_traces{1,3} = 'is_gather'; % 1 is yes, 0 is no
+% 
+% output_dir = [gather_meta.output_dir,'trimout/'];
+% % check to see if the directory exists
+% if exist(output_dir,'dir') == 0
+%     mkdir(output_dir);
+% end
+% 
+% 
+% 
+% % stack result
+% filename2 = 'stack';
+% stack_traces{2,1} = strcat(filename2,'_input');
+% stack_traces{2,2} = zeros(seismic.n_samples,seismic.n_gathers,'single');
+% stack_traces{3,1} = strcat(filename2,'_output');
+% stack_traces{3,2} = zeros(seismic.n_samples,seismic.n_gathers,'single');
+% %stack_traces{4,1} = strcat(filename2,'_posttrim_no_resid_',num2str(startvol),'-',num2str(endvol),'_',num2str(zsmooth));
+% stack_traces{4,1} = strcat(filename2,'_velocity');
+% stack_traces{4,2} = zeros(seismic.n_samples,seismic.n_gathers,'single');
+% stack_traces{2,3} = 0;
+% stack_traces{3,3} = 0;
+% stack_traces{4,3} = 0;
 
 % ============================================================================================================
 % apply nmo
 
-offsets = reshape(offsets,seismic.fold,[]);
-
 if apply_nmo_switch == 1
    for gather = 1:seismic.n_gathers
-       traces{3,2}(:,:,gather) = nmo(traces{3,2}(:,:,gather),seismic.s_rate/1000000,offsets(:,gather),veltimes(:,gather),veltrace(:,gather),1000);
+       traces(:,:,gather) = nmo(traces(:,:,gather),seismic.s_rate/1000000,offsets(:,gather),veltimes(:,gather),veltrace(:,gather),1000);
    end
 end
 
@@ -168,122 +361,59 @@ end
 % ============================================================================================================
 % calculate offsets from angles and velocities and make mute masks
 
-angles = [stack_itm stack_otm pick_otm];
+angles = [itm otm];
 
 nsamples = size(veltrace,1);
 
-stack_mute=zeros(nsamples,seismic.fold,seismic.n_gathers);
-pick_mute=zeros(size(stack_mute));
-
-% stack_mute=zeros(size(vel_traces{3,2}));
-% pick_mute=zeros(size(vel_traces{3,2}));
-% stack_fold=zeros(velocity.nsamples,velocity.n_gathers);
-% pick_fold=zeros(velocity.nsamples,velocity.n_gathers);
+pick_mute=zeros(nsamples,seismic.fold,seismic.n_gathers);
 
 ntraces=seismic.n_gathers;
 
-offset_traces = zeros(nsamples,size(angles),ntraces);
+offset_traces = zeros(nsamples,2,ntraces);
 
 angles_rad = 2*pi*angles/360;
-
-% ======================================================================
-%
-% dix convert rms to interval
-%
-% replace with constrained inversion
-%
-vint=zeros(nsamples,ntraces);
-tt = ((1:nsamples).*100)';
-
-%tts = [0;tt(1:end-1)];
-%veltrace_s = [veltrace(1);veltrace(1:end-1)];
-
-%vint = sqrt(((veltrace.^2.*tt) - (veltrace_s.^2.*tts)) ./ (tt-tts));
-
-% this is how to do it if you have more than one vel trace but only one
-% column of times
-
-vint = bsxfun(@velfun,veltrace,tt);
-
-
-
-% vint = sqrt(bsxfun(@rdivide,(bsxfun(@times,(veltrace.^2),tt) - bsxfun(@times,(veltrace_s.^2),tts)),(tt-tts)));
-
-
 
 % =====================================================================
 
 % angle calculation
 
-% sine theta = (offset * vint) / (t * vrms^2)
 
-% => offset = (t * vrms^2 * sine theta) / vint
+% tan theta = 0.5 * offset / depth = 0.5 * offset / (0.5 * twtt * vrms)
+% => offset = tan theta * twtt * vrms
 
-
-for ang_idx=1:max(size(angles))
+for ang_idx=1:length(angles)
     
-    offset_traces(:,ang_idx,:) = bsxfun(@times,tt,((veltrace/1000).^2 * sin(angles_rad(ang_idx)))) ./ (vint/1000);
+    offset_traces(:,ang_idx,:) = bsxfun(@times,veltimes,veltrace * tan(angles_rad(ang_idx)));
     
-%     for trc_idx=1:ntraces
-%     
-%         offset_traces(:,ang_idx,trc_idx) = (tt(:) .* vel_traces(:,trc_idx) .* sin(angles_rad(ang_idx))) ./ vint(:,trc_idx);
-%     
-%     end
 end
-
 
 % compare trace offsets with those calculated for the mute angles and
 % create a mute mask for each gather
 
-mute1 = squeeze(offset_traces(:,1,:));
-mute2 = squeeze(offset_traces(:,2,:));
-mute3 = squeeze(offset_traces(:,3,:));
+itm_mute = squeeze(offset_traces(:,1,:));
+otm_mute = squeeze(offset_traces(:,2,:));
 
 % make matrix to keep n traces live when applying otm
 
-otm_limit = [ones(7,1);zeros(seismic.fold-7,1)];
+otm_limit = [ones(min_fold,1);zeros(seismic.fold-min_fold,1)];
    
 
-for i_samp = 1:1:size(offset_traces,1)    
-    stack_mute(i_samp,:,:) = bsxfun(@gt,offsets,mute1(i_samp,:)).*bsxfun(@or,bsxfun(@lt,offsets,mute2(i_samp,:)),otm_limit);
-    pick_mute(i_samp,:,:) = bsxfun(@lt,offsets,mute3(i_samp,:));
+for i_samp = 1:size(offset_traces,1)    
+    mute_mask(i_samp,:,:) = bsxfun(@gt,offsets,itm_mute(i_samp,:)).*bsxfun(@or,bsxfun(@lt,offsets,otm_mute(i_samp,:)),otm_limit);
 end
 
-
-% for gather_idx=1:seismic.ngathers
-%     
-%     % offset_lookup = offset_vs_angle(velocity_meta,angles,vel_traces{3,2});
-%     
-%     for off_idx=1:seismic.fold
-%         stack_mute(:,off_idx,gather_idx) = (offsets(gather_idx) >= offset_lookup(:,1,gather_idx)) ...
-%             .* (offsets(gather_idx) <= offset_lookup(:,2,gather_idx));
-%         pick_mute(:,off_idx,gather_idx) = (offsets(gather_idx) <= offset_lookup(:,3,gather_idx));
-%     end
-%     stack_fold(:,gather_idx) = sum(stack_mute,2);
-%     pick_fold(:,gather_idx) = sum(pick_mute,2);
-% end
-
-% interpolate the mutes onto the seismic sampling rate
+% find range of live traces
 
 ssr = seismic.s_rate/1000;
 sn = seismic.n_samples;
-%vs = velocity.srate;
-%vn = velocity.nsamples;
 
-vs=100;
+vs=velstr.s_rate/1000;
 vn=nsamples;
 
-stack_mute = interp1([ssr vs:vs:vs*vn vs*vn+vs],[stack_mute(1,:,:);stack_mute;stack_mute(end,:,:)],ssr:ssr:ssr*sn);
-pick_mute = interp1([ssr vs:vs:vs*vn vs*vn+vs],[pick_mute(1,:,:);pick_mute;pick_mute(end,:,:)],ssr:ssr:ssr*sn);
-
-
 % interp mute mask onto seismic sampling
-
-
 % pad mute with extra row at start and interpolate:
 
-
-% stack_traces{2,2} = (sum(traces{3,2},2);
+mute_mask = interp1([ssr vs:vs:vs*vn vs*vn+vs],[mute_mask(1,:,:);mute_mask;mute_mask(end,:,:)],ssr:ssr:ssr*sn);
 
 % pad and smooth mutes then remove padding
 
@@ -292,196 +422,120 @@ smth = linspace(0,1,0.5*taperlen);
 smth = [smth smth((end-1):-1:2)];
 smth = smth'/sum(smth);
 
-stack_mute = [stack_mute;repmat(stack_mute(end,:,:),size(smth,1)*2,1)];
-stack_mute = convn(stack_mute,smth,'same');
-stack_mute = stack_mute(1:seismic.n_samples,:,:);
+mute_mask = [mute_mask;repmat(mute_mask(end,:,:),size(smth,1)*2,1)];
+mute_mask = convn(mute_mask,smth,'same');
+mute_mask = mute_mask(1:seismic.n_samples,:,:);
 
-pick_mute = [pick_mute;repmat(pick_mute(end,:,:),size(smth,1)*2,1)];
-pick_mute = convn(pick_mute,smth,'same');
-pick_mute = pick_mute(1:seismic.n_samples,:,:);
-
+% apply the mute
+traces = traces.*mute_mask;
 
 clear ssr; clear sn; clear vs; clear vn;
 
 % ============================================================================================================
 % pick trim shifts and get maximum x-correlation peaks
 
-unmuted_traces = traces{3,2};
-
-traces{3,2} = traces{3,2}.*stack_mute;
-
+% we want output to be inline,xline,time,velocity
+output_matrix = zeros(ceil(seismic.n_samples/gap)*seismic.n_gathers,4);
+outcount = 0;
 % run just for a subset for testing
-
-[trim_shifts,~,~,trim_coeffs] = trim_shifts_calculate('calc',gather_meta,traces{3,2},'1','4');
-
-% pick xcorrelation peaks - these are times to pick velocities at
-
-% fairly sure this is v inefficient way of doing it
-% also try smoothing the coefficents to get more consistent time picks
-
-% mask out areas for picking based on the stack
-stack = squeeze(sum(traces{3,2},2));
-stackfold = squeeze(sum(stack_mute,2));
-stack = stack ./ stackfold;
-% gaussian
-t = linspace(-1,1,51)';
-filttraces = zeros(length(t),1);
-a = 1;
-filttraces = sqrt(pi)/a*exp(-(pi*t/a).^2);
-filttraces = filttraces/sum(filttraces);
-filttraces = filttraces';
-
-stack_mask=zeros(size(trim_coeffs));
-stack_mask(1:2500,:)=bwareaopen(convn(stk_event_zones(stack,10,7),filttraces,'same')>0.4,400);
-
-
-trim_coeffs = trim_coeffs.*stack_mask;
-
-% zero the first 100 samples
-
-trim_coeffs(1:100,:) = 0;
-
-gap = 20;
-
-coeff_peaks_out = zeros(size(trim_coeffs));
-
-smth = [1];
-smth = smth / sum(smth);
-pad = ceil(size(smth,2)/2);
-
-coeffs_smth = convn([repmat(trim_coeffs(:,1),1,pad) trim_coeffs repmat(trim_coeffs(:,size(trim_coeffs,2)),1,pad)],smth,'same');
-coeffs_smth = coeffs_smth(:,(pad+1):(size(coeffs_smth,2)-pad));
-
-
-for trc = 1:size(coeffs_smth,2);
-    
-    while max(coeffs_smth(:,trc))>0.8
-        
-        [~,peak_idx] = max(coeffs_smth(:,trc));
-        coeff_sm_peaks_out(peak_idx,trc) = coeffs_smth(peak_idx,trc);
-        start_mask=max(peak_idx-gap,1);
-        end_mask=min(peak_idx+gap,seismic.n_samples);
-        
-        coeffs_smth(start_mask:end_mask,trc) = 0;
-        
-    end
-    
-end
-
-
-% ============================================================================================================
-
-% calc travel times for trim picks (assume straight ray)
-
-% tt = sqrt(t0^2 + (offset^2/v^2))
-
-
-velout = zeros(1500,seismic.n_gathers,3);
-
-
 for gather = 1:seismic.n_gathers
-%for gather = 1:100
     
-  pick_idx = find(coeff_sm_peaks_out(:,gather));
-  pick_times = pick_idx * seismic.s_rate/1000;
-  
-  vels = 0.001*interp1([0 100:100:5000],[veltrace(1,gather);veltrace(:,gather)]',pick_times);
-  
-  t0times = bsxfun(@minus,trim_shifts(pick_idx,:,gather),pick_times);
-  %t0times2 = bsxfun(@plus,-trim_shifts(pick_idx,:,gather),pick_times);
-  %t0times2 = bsxfun(@minus,trim_shifts(pick_idx,:,gather),pick_times);
-  ttimes = sqrt(t0times.^2 + bsxfun(@rdivide,double(offsets(:,gather)'.^2),vels.^2));
+    gather_in = traces(:,:,gather);
+    il_idx = (gather_ilxl(gather,1) - min_il)/il_inc;
+    xl_idx = 1 + (gather_ilxl(gather,2) - min_xl)/xl_inc;
+    ilxl_idx = il_idx * num_xls + xl_idx;
 
-  % set times in mute zone to be NaN
-  
-  ttimes(stack_mute(pick_idx,:,1)<1) = NaN;
-  
-  % scale the travel times by the number of picks on each event -
-  % this has the effect of weighting each event equally in the solution
-  % also scale by 1/t so that the error is proportional to the velocity
-  % error
-  %
-  % also supply initial guess at solution so lsqr has less work to do and
-  % is less likely to stagnate before getting to sensible answer
-  
-  scale_fn = sum(isfinite(ttimes),2);
-  scale_fn = scale_fn./pick_times;
-  scale_fn = max(scale_fn)./scale_fn;
-  ttimes = bsxfun(@times,ttimes,scale_fn);
-  ini_tv = [pick_times ones(size(pick_times),1).*1.5];
-  ini_tv(:,1) = ini_tv(:,1) .* scale_fn;
-  ini_tv(:,2) = ini_tv(:,2) ./ scale_fn;
-  
-%   smth = [1:ceil(smth_size/2) floor(smth_size/2):-1:1];
-%   smth = smth'./sum(smth);
-%   pad = floor(size(smth,1)/2);
-  
-%   for iter = 1:num_iter
-%       
-      [v_est{gather} t_est{gather}] = invert_T_V_from_picks(ttimes,offsets(:,gather),ini_tv);
-      
-      v_est{gather} = v_est{gather}.*scale_fn;
-      t_est{gather} = t_est{gather}./scale_fn;
-      
-%       slness = v_est{gather}.^-1;
-%       slness = [repmat(slness(1),pad,1);slness;repmat(slness(end),pad,1)];
-%       slness = conv(slness,smth,'valid');
-%       ini_tv(:,2) = (slness.^-1) ./ scale_fn;
-
-      t_est{gather}(1)=t_est{gather}(1)+1;
-      velout(:,gather,1) = interp1([0;t_est{gather}],[v_est{gather}(1);v_est{gather}],2:2:3000);
-      
-      outtimes = sqrt(bsxfun(@plus,t_est{gather}.^2,bsxfun(@rdivide,double(offsets(:,gather)'.^2),v_est{gather}.^2)));
-      intimes = bsxfun(@rdivide,ttimes,scale_fn);
-      timediff=outtimes-intimes;
-      timediff(isnan(ttimes))=NaN;
-      resdiff{gather} = nanmean(abs(timediff),2);
-      resdiff_signed{gather} = nanmean(timediff,2);
-      resdiffnorm{gather} = 1000*resdiff{gather}./pick_times;
-      resdiff_signed_norm{gather} = 1000*resdiff_signed{gather}./pick_times;
-      
-      % exclude picks with large resid error from 200 samples down
-      
-%       ttimes2 = ttimes(resdiff<=median(resdiff),:);
-%       ini_tv2 = ini_tv(resdiff<=median(resdiff),:);
-%       scale_fn2 = scale_fn(resdiff<=median(resdiff),:);
-
-      v_est2{gather} = v_est{gather}((resdiffnorm{gather}<=0.5) | (t_est{gather}<400));
-      t_est2{gather} = t_est{gather}((resdiffnorm{gather}<=0.5) | (t_est{gather}<400));
-
-      velout(:,gather,2) = interp1([0;t_est2{gather}],[v_est2{gather}(1);v_est2{gather}],2:2:3000);
-      
-      
-%       [v_est{gather} t_est{gather}] = invert_T_V_from_picks(ttimes2,offsets(:,gather),ini_tv2);
-%       
-%        t_est{gather}(1)=t_est{gather}(1)+1;
-%       velout(:,gather,3) = interp1([0;t_est{gather}],[v_est{gather}(1);v_est{gather}],2:2:3000);
-     
-      
-%   end
-  
-  
-  tvpairs{gather}(:,1) = t_est{gather};
-  tvpairs{gather}(:,2) = v_est{gather};
-  
-  tvpairs2{gather}(:,1) = t_est2{gather};
-  tvpairs2{gather}(:,2) = v_est2{gather};
-
+    start_idx = round(1000*horz_times(ilxl_idx,1)./seismic.s_rate);
+    stop_idx = round(1000*horz_times(ilxl_idx,2)./seismic.s_rate);
+    vert_sum = sum(gather_in(start_idx:stop_idx,:),1);
+    start_gath = find(vert_sum,1,'first');
+    end_gath = find(vert_sum,1,'last');
+    
+    if end_gath-start_gath > 0
+        
+        gather_in = gather_in(start_idx:stop_idx,start_gath:end_gath);
+        
+        [trim_shifts,~,~,trim_coeffs] = trim_shifts_calculate('calc',gather_meta,gather_in,'1','4');
+        
+        % pick peak values of xcor coefficients to get times for picks
+        %
+        % this loop picks the maximum value, then sets surrounding values
+        % to zero and continues to loop until there are no more values over
+        % the minimum threshold. Might be faster way to do it.
+        
+        coeff_peaks_out = zeros(size(trim_coeffs));
+        
+        while max(trim_coeffs)>threshold % threshold is a user parameter
+            [~,peak_idx] = max(trim_coeffs);
+            coeff_peaks_out(peak_idx) = trim_coeffs(peak_idx);
+            start_mask=max(peak_idx-gap,1);
+            end_mask=min(peak_idx+gap,seismic.n_samples);
+            trim_coeffs(start_mask:end_mask) = 0;
+        end
+        
+        pick_idx = find(coeff_peaks_out);
+        
+        if size(pick_idx,1) > 0 % check we have some picks over the threshold
+            
+            ptimes = (start_idx + pick_idx) * seismic.s_rate/1000;
+            
+            %==============================================================
+            
+            numpicks = size(ptimes,1);
+            startcount = outcount+1;
+            outcount = outcount + numpicks + 2; % add 2 extra picks at start and end of record for interpolation
+            vels = 0.001*interp1(veltimes*1000,veltrace(:,gather),ptimes); % times are in ms, so make vels m/ms
+            
+            t0times = bsxfun(@minus,trim_shifts(pick_idx,:),ptimes);
+            ttimes = sqrt(t0times.^2 + bsxfun(@rdivide,double(offsets(start_gath:end_gath,gather)'.^2),vels.^2));
+            
+            % set times in mute zone to be NaN
+            
+            ttimes(mute_mask(pick_idx+start_idx,start_gath:end_gath,gather)<1) = NaN;
+            vel_out = zeros(numpicks,1);
+            for ii = 1:numpicks
+                tsq = (ttimes(ii,~isnan(ttimes(ii,:)))./1000).^2;
+                offsq = offsets(~isnan(ttimes(ii,:)),gather).^2;
+                p = polyfit(double(offsq),tsq',1);
+                vel_out(ii) = 1/sqrt(p(1));
+                %             vel_out(gather,ii) = 1/sqrt(p(1));
+                
+            end
+            
+            % add a pick at start and end of trace to help with interpolation
+            
+            output_matrix(startcount:outcount,1) = gather_ilxl(gather,1);
+            output_matrix(startcount:outcount,2) = gather_ilxl(gather,2);
+            output_matrix(startcount:outcount,3) = [seismic.s_rate/1000;ptimes;seismic.n_samples*seismic.s_rate/1000];
+            output_matrix(startcount:outcount,4) = [vel_out(1);vel_out;vel_out(end)];
+            
+        end
+    end
 end
+
+% vint = bsxfun(@velfun,veltrace,veltimes);
+
+out_filename = strcat(outdir,'rms_picks_gap',num2str(gap),'_mute',num2str(itm),'_',num2str(otm),'_thr',num2str(threshold*100),'_',start_horz,'_',stop_horz,'_block',num2str(i_block));
+
+output_matrix = output_matrix(1:outcount,:);
+
+dlmwrite(strcat(out_filename,'.txt'),output_matrix);
+
+save(strcat(out_filename,'.mat'),'output_matrix');
 
 % write some output
 
 
-stack_traces{2,2} = stack;
-stack_traces{4,2} = velout;
-i_block = str2double(i_block);
-node_segy_write(stack_traces,i_block,seismic.s_rate/1000,outdir);
+% stack_traces{2,2} = stack;
+% stack_traces{4,2} = velout;
+% i_block = str2double(i_block);
+% node_segy_write(stack_traces,i_block,seismic.s_rate/1000,outdir);
+% 
+% save(strcat(outdir,'rms_picks_block',int2str(i_block),'.mat'),'ntraces','tvpairs','tvpairs2',...
+%     'stack_traces','stack','stack_mask','resdiff','resdiffnorm','resdiff_signed','resdiff_signed_norm');
 
-save(strcat(outdir,'rms_picks_block',int2str(i_block),'.mat'),'ntraces','tvpairs','tvpairs2',...
-    'stack_traces','stack','stack_mask','resdiff','resdiffnorm','resdiff_signed','resdiff_signed_norm');
 
-
-                        end
+end
 
 function vint = velfun(vrms,ttimes)
 tts = [0;ttimes(1:end-1)];

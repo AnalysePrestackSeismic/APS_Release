@@ -1,5 +1,27 @@
 function [strseismic trace_ilxl_bytes traces]=segy_to_mat(xloc_byte,yloc_byte,filename)
 %% ------------------ Disclaimer  ------------------
+% 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) makes no representation or warranty, express or implied, in 
+% respect to the quality, accuracy or usefulness of this repository. The code
+% is this repository is supplied with the explicit understanding and 
+% agreement of recipient that any action taken or expenditure made by 
+% recipient based on its examination, evaluation, interpretation or use is 
+% at its own risk and responsibility.
+% 
+% No representation or warranty, express or implied, is or will be made in 
+% relation to the accuracy or completeness of the information in this 
+% repository and no responsibility or liability is or will be accepted by 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) in relation to it.
+%% ------------------ License  ------------------ 
+% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+%% github
+% https://github.com/AnalysePrestackSeismic/
+%% ------------------ FUNCTION DEFINITION ---------------------------------
+%% ------------------ Disclaimer  ------------------
 % ------------------ FUNCTION DEFINITION ---------------------------------
 % Function segy_to_mat reads a segy file and returns the data as a matrix
 % Inputs: xloc = inline byte location
@@ -11,8 +33,13 @@ function [strseismic trace_ilxl_bytes traces]=segy_to_mat(xloc_byte,yloc_byte,fi
 %%        
 %------------- CONVERT STRING (ARGUMENTS) TO DOUBLE----------------------
 
-xloc_byte = str2double(xloc_byte);                                  % In-line byte location from argument
-yloc_byte = str2double(yloc_byte);                                  % X-line byte location from argument
+if isa(xloc_byte,'char')
+    xloc_byte = str2double(xloc_byte);
+end
+% In-line byte location from argument
+if isa(yloc_byte,'char')
+    yloc_byte = str2double(yloc_byte);                                  % X-line byte location from argument
+end
 
 %------------ SCAN THE SEGY FILE HEADERS AND REFORMATTING------------------
 % Read input file

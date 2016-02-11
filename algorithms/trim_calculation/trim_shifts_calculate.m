@@ -1,5 +1,26 @@
 function [out_traces stack_shifts stack_traces coeff_sum ] = trim_shifts_calculate(mode,job_meta,traces,timbal,shift_param)
-% this works out and applies trim statics and keeps a sum of the statics
+%% ------------------ Disclaimer  ------------------
+% 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) makes no representation or warranty, express or implied, in 
+% respect to the quality, accuracy or usefulness of this repository. The code
+% is this repository is supplied with the explicit understanding and 
+% agreement of recipient that any action taken or expenditure made by 
+% recipient based on its examination, evaluation, interpretation or use is 
+% at its own risk and responsibility.
+% 
+% No representation or warranty, express or implied, is or will be made in 
+% relation to the accuracy or completeness of the information in this 
+% repository and no responsibility or liability is or will be accepted by 
+% BG Group plc or any of its respective subsidiaries, affiliates and 
+% associated companies (or by any of their respective officers, employees 
+% or agents) in relation to it.
+%% ------------------ License  ------------------ 
+% GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+%% github
+% https://github.com/AnalysePrestackSeismic/
+%% ------------------ FUNCTION DEFINITION ---------------------------------
 % for each z sample
 % 
 % mode: 'calc' or 'apply'
@@ -555,10 +576,18 @@ for kk = 1:n_traces;
         %             end
         
     end
-    trim_coeffb_out(trim_coeffb_out == 0) = NaN;               % set zero to NaN for nanmean
     
-    coeff_sum(:,kk) = nanmean(trim_coeffb_out,2);
-    coeff_sum(isnan(coeff_sum)) = 0;
+     trim_coeffb_out(isnan(trim_coeffb_out)) = 0;
+     nlive = sum(trim_coeffb_out~=0,2);
+    nlive(nlive==0) = 1;
+    coeff_sum(:,kk) = sum(trim_coeffb_out,2);
+    coeff_sum(:,kk) = coeff_sum(:,kk)./nlive;
+    
+%     trim_coeffb_out(trim_coeffb_out == 0) = NaN;               % set zero to NaN for nanmean
+    
+    % coeff_sum(:,kk) = nanmean(trim_coeffb_out,2); 
+    
+%     coeff_sum(isnan(coeff_sum)) = 0;
     
     stack_traces = 0;
     stack_shifts=0;
