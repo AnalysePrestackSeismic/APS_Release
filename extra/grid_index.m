@@ -1,4 +1,4 @@
-function [ downlogs ] = downsample(logs,sampint)
+function [ grid_index,nx,ny ] = grid_index( x,y,fx,lx,xi,fy,ly,yi )
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -20,9 +20,15 @@ function [ downlogs ] = downsample(logs,sampint)
 % GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 %% github
 % https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-%DOWNSAMPLE Summary of this function goes here
+%GRID_INDEX Finds index of a x,y location in a grid
+%
 %   Detailed explanation goes here
- downlogs = logs(1:sampint:end,:);
+
+nx = 1 + (lx - fx)/xi;
+ny = 1 + (ly - fy)/yi;
+x_idx = (x - fx)/xi;
+y_idx = (y - fy)/yi;
+grid_index = x_idx * ny + y_idx + 1;
+
 end
 

@@ -1,4 +1,4 @@
-function [ downlogs ] = downsample(logs,sampint)
+function [peaks_out, peaks_idx ] = find_peaks( input_vector,threshold,gap )
 %% ------------------ Disclaimer  ------------------
 % 
 % BG Group plc or any of its respective subsidiaries, affiliates and 
@@ -20,9 +20,29 @@ function [ downlogs ] = downsample(logs,sampint)
 % GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 %% github
 % https://github.com/AnalysePrestackSeismic/
-%% ------------------ FUNCTION DEFINITION ---------------------------------
-%DOWNSAMPLE Summary of this function goes here
+
+%FIND_PEAKS reduce a vector to a sparse set of peaks
 %   Detailed explanation goes here
- downlogs = logs(1:sampint:end,:);
+
+% input should be a vector
+
+if min(size(input_vector)) ~= 1 || ndims(input_vector) ~= 2
+    error('Input must be vector.')
+end
+    
+
+peaks_out = zeros(size(input_vector));
+
+while max(input_vector)>threshold % threshold is a user parameter
+    [~,idx] = max(input_vector);
+    peaks_out(idx) = input_vector(idx);
+    start_mask=max(idx-gap,1);
+    end_mask=min(idx+gap,length(peaks_out));
+    input_vector(start_mask:end_mask) = 0;
+end
+
+peaks_idx = find(peaks_out);
+
+
 end
 
